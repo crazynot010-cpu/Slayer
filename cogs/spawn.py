@@ -4,7 +4,7 @@ from discord.ext import commands
 from discord import app_commands
 from database import users, guilds, shadows
 
-SPAWN_THRESHOLD = 40
+SPAWN_THRESHOLD = 10
 
 
 class SpawnCog(commands.Cog):
