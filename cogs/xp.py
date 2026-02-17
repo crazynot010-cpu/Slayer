@@ -6,8 +6,7 @@ from discord import app_commands
 
 from database import users, guilds
 from utils.calculations import xp_required
-from utils.rank_utils import get_rank_from_level
-from utils.spawn_manager import generate_spawn_threshold
+from utils.rank_utils import get_rank_from_level, RANK_COLORS
 
 XP_COOLDOWN = 15  # seconds
 XP_MIN = 8
@@ -35,20 +34,20 @@ class XPCog(commands.Cog):
 
     async def handle_rank_update(self, member: discord.Member, new_rank: str):
         guild = member.guild
-        role = discord.utils.get(guild.roles, name=f"Hunter {new_rank}")
+        role_name = f"Hunter {new_rank}"
+
+        role = discord.utils.get(guild.roles, name=role_name)
 
         if not role:
             role = await guild.create_role(
-                name=f"Hunter {new_rank}",
-                colour=discord.Colour.from_str(
-                    f"#{format(__import__('utils.rank_utils').rank_utils.RANK_COLORS[new_rank], '06x')}"
-                )
+                name=role_name,
+                colour=discord.Colour(RANK_COLORS[new_rank])
             )
 
-        for r in guild.roles:
-            if r.name.startswith("Hunter ") and r != role:
-                if r in member.roles:
-                    await member.remove_roles(r)
+        # Remove old hunter roles
+        for r in member.roles:
+            if r.name.startswith("Hunter ") and r.name != role_name:
+                await member.remove_roles(r)
 
         if role not in member.roles:
             await member.add_roles(role)
@@ -69,14 +68,14 @@ class XPCog(commands.Cog):
         if now - user["last_xp_time"] < XP_COOLDOWN:
             return
 
-        guild_config = await guilds.find_one({"guild_id": message.guild.id})
+        # Safe guild config
+        guild_config = await guilds.find_one({"guild_id": message.guild.id}) or {}
         xp_rate = guild_config.get("xp_rate", 1.0)
 
         gained = int(random.randint(XP_MIN, XP_MAX) * xp_rate)
 
         new_xp = user["xp"] + gained
         level = user["level"]
-
         leveled_up = False
 
         while new_xp >= xp_required(level):
@@ -104,8 +103,11 @@ class XPCog(commands.Cog):
             )
             await self.handle_rank_update(message.author, new_rank)
 
+    # ---------------- COMMANDS ---------------- #
+
     @commands.command(name="xp")
     async def xp_prefix(self, ctx):
+        await self.ensure_user(ctx.author.id, ctx.guild.id)
         user = await users.find_one({
             "user_id": ctx.author.id,
             "guild_id": ctx.guild.id
@@ -117,6 +119,7 @@ class XPCog(commands.Cog):
 
     @app_commands.command(name="xp", description="View your XP")
     async def xp_slash(self, interaction: discord.Interaction):
+        await self.ensure_user(interaction.user.id, interaction.guild.id)
         user = await users.find_one({
             "user_id": interaction.user.id,
             "guild_id": interaction.guild.id
@@ -128,6 +131,7 @@ class XPCog(commands.Cog):
 
     @commands.command(name="level")
     async def level_prefix(self, ctx):
+        await self.ensure_user(ctx.author.id, ctx.guild.id)
         user = await users.find_one({
             "user_id": ctx.author.id,
             "guild_id": ctx.guild.id
@@ -139,6 +143,7 @@ class XPCog(commands.Cog):
 
     @app_commands.command(name="level", description="View your level info")
     async def level_slash(self, interaction: discord.Interaction):
+        await self.ensure_user(interaction.user.id, interaction.guild.id)
         user = await users.find_one({
             "user_id": interaction.user.id,
             "guild_id": interaction.guild.id
