@@ -22,11 +22,12 @@ COGS = [
     "cogs.admin",
     "cogs.stats",
     "cogs.help",
+    "cogs.advanced",
 ]
 
 
 # =========================
-# INTENTS (CLEAN & SAFE)
+# INTENTS
 # =========================
 
 intents = discord.Intents.default()
@@ -51,6 +52,7 @@ class ShadowBot(commands.Bot):
 
         print("Loading cogs...")
 
+        # Load all cogs
         for cog in COGS:
             try:
                 await self.load_extension(cog)
@@ -58,13 +60,6 @@ class ShadowBot(commands.Bot):
             except Exception as e:
                 print(f"❌ Failed to load {cog}")
                 print(e)
-
-        try:
-            synced = await self.tree.sync()
-            print(f"🔁 Synced {len(synced)} slash commands.")
-        except Exception as e:
-            print("❌ Slash sync failed:")
-            print(e)
 
 
 bot = ShadowBot()
@@ -81,6 +76,15 @@ async def on_ready():
     print(f"Bot ID: {bot.user.id}")
     print("-----------------------------------")
 
+    # 🔥 GUILD SYNC (INSTANT UPDATE)
+    for guild in bot.guilds:
+        try:
+            synced = await bot.tree.sync(guild=guild)
+            print(f"🔁 Synced {len(synced)} commands to {guild.name}")
+        except Exception as e:
+            print(f"❌ Failed syncing {guild.name}")
+            print(e)
+
 
 @bot.event
 async def on_guild_join(guild: discord.Guild):
@@ -92,12 +96,14 @@ async def on_guild_join(guild: discord.Guild):
                 "guild_id": guild.id,
                 "spawn_channel": None,
                 "xp_rate": 1.0,
-                "message_count": 0,
-                "next_spawn_threshold": 45,
+                "spawn_counter": 0,
                 "active_spawn": None
             })
 
             print(f"Created config for guild: {guild.name}")
+
+        # Sync commands instantly for new guild
+        await bot.tree.sync(guild=guild)
 
     except Exception as e:
         print(f"Error creating guild config for {guild.name}:")
