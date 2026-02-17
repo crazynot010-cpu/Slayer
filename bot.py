@@ -1,27 +1,27 @@
 import discord
 from discord.ext import commands, tasks
+from discord import app_commands
 from pymongo import MongoClient
 import os
 import random
 import time
 import math
 
-# ================== CONFIG ==================
+# ================= CONFIG =================
 
 TOKEN = os.getenv("TOKEN")
 MONGO_URI = os.getenv("MONGO_URI")
 
 SPAWN_MIN_MESSAGES = 30
 SPAWN_MAX_MESSAGES = 60
-SPAWN_CHANCE = 0.43
+SPAWN_TRIGGER_CHANCE = 0.43
 SPAWN_TIMEOUT = 300
 
-ARISE_SUCCESS_RATE = 0.55
-
+ARISE_SUCCESS = 0.55
 MAX_DUPES = 3
 MAX_SLOTS = 16
 
-# ============================================
+# ==========================================
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -35,10 +35,15 @@ users = db["users"]
 guilds = db["guilds"]
 shadows = db["shadows"]
 
-# ================== UTIL ==================
+# ================= UTIL =================
 
 def xp_required(level):
     return int(100 * level + (level ** 2 * 25))
+
+def xp_bar(current, required, length=20):
+    percent = current / required
+    filled = int(length * percent)
+    return "█" * filled + "░" * (length - filled)
 
 def get_user(user_id):
     user = users.find_one({"user_id": user_id})
@@ -66,7 +71,19 @@ def get_guild(guild_id):
         guilds.insert_one(data)
     return data
 
-# ================== XP SYSTEM ==================
+# ================= AUTO CLEANUP =================
+
+@tasks.loop(seconds=30)
+async def cleanup_spawns():
+    for guild_data in guilds.find({"active_spawn": {"$ne": None}}):
+        spawn = guild_data["active_spawn"]
+        if spawn and time.time() > spawn["expires"]:
+            guilds.update_one(
+                {"guild_id": guild_data["guild_id"]},
+                {"$set": {"active_spawn": None}}
+            )
+
+# ================= XP + SPAWN =================
 
 @bot.event
 async def on_message(message):
@@ -76,23 +93,17 @@ async def on_message(message):
     guild_data = get_guild(message.guild.id)
     user_data = get_user(message.author.id)
 
-    # XP gain
+    # XP Gain
     xp_gain = random.randint(5, 15)
-    users.update_one(
-        {"user_id": message.author.id},
-        {"$inc": {"xp": xp_gain}}
-    )
+    users.update_one({"user_id": message.author.id}, {"$inc": {"xp": xp_gain}})
 
     user_data = get_user(message.author.id)
 
-    # Level up check
+    # Level Up
     while user_data["xp"] >= xp_required(user_data["level"]):
         users.update_one(
             {"user_id": message.author.id},
-            {
-                "$inc": {"level": 1},
-                "$set": {"xp": 0}
-            }
+            {"$inc": {"level": 1}, "$set": {"xp": 0}}
         )
         user_data = get_user(message.author.id)
 
@@ -102,13 +113,11 @@ async def on_message(message):
 
         role_name = f"Level {user_data['level']}"
         role = discord.utils.get(message.guild.roles, name=role_name)
-
         if not role:
             role = await message.guild.create_role(name=role_name)
-
         await message.author.add_roles(role)
 
-    # Spawn system
+    # Spawn counter
     guilds.update_one(
         {"guild_id": message.guild.id},
         {"$inc": {"message_count": 1}}
@@ -119,23 +128,39 @@ async def on_message(message):
     if guild_data["message_count"] >= guild_data["next_spawn"]:
         guilds.update_one(
             {"guild_id": message.guild.id},
-            {"$set": {"message_count": 0,
-                      "next_spawn": random.randint(SPAWN_MIN_MESSAGES, SPAWN_MAX_MESSAGES)}}
+            {"$set": {
+                "message_count": 0,
+                "next_spawn": random.randint(SPAWN_MIN_MESSAGES, SPAWN_MAX_MESSAGES)
+            }}
         )
 
-        if random.random() <= SPAWN_CHANCE:
-            await spawn_shadow(message.guild, message.channel)
+        if random.random() <= SPAWN_TRIGGER_CHANCE:
+            await spawn_shadow(message.guild)
 
     await bot.process_commands(message)
 
-# ================== SPAWN ==================
+# ================= SPAWN =================
 
-async def spawn_shadow(guild, channel):
+async def spawn_shadow(guild):
+    guild_data = get_guild(guild.id)
+
+    if guild_data["active_spawn"]:
+        return
+
+    if not guild_data["spawn_channel"]:
+        return
+
+    channel = guild.get_channel(guild_data["spawn_channel"])
+    if not channel:
+        return
+
     shadow_list = list(shadows.find())
     if not shadow_list:
         return
 
-    chosen = random.choice(shadow_list)
+    # Weighted spawn
+    weights = [s.get("spawnchance", 1) for s in shadow_list]
+    chosen = random.choices(shadow_list, weights=weights, k=1)[0]
 
     guilds.update_one(
         {"guild_id": guild.id},
@@ -151,53 +176,58 @@ async def spawn_shadow(guild, channel):
 
     embed = discord.Embed(
         title="A Shadow Has Appeared!",
-        description="Use `!arise <name>` to capture it!",
+        description="Use `!arise <name>`",
         color=discord.Color.dark_purple()
     )
     embed.set_image(url=chosen["image"])
 
-    await channel.send(embed=embed)
+    content = ""
+    if guild_data["ping_role"]:
+        content = f"<@&{guild_data['ping_role']}>"
 
-# ================== ARISE ==================
+    await channel.send(content=content, embed=embed)
 
-@bot.command()
-async def arise(ctx, name: str):
+# ================= ARISE =================
+
+async def arise_logic(ctx, name):
     guild_data = get_guild(ctx.guild.id)
-
     spawn = guild_data.get("active_spawn")
+
     if not spawn:
         return await ctx.send("No shadow has spawned!")
 
     if spawn["claimed"]:
-        return await ctx.send("This shadow was already claimed!")
+        return await ctx.send("Already claimed!")
 
     if time.time() > spawn["expires"]:
         guilds.update_one(
             {"guild_id": ctx.guild.id},
             {"$set": {"active_spawn": None}}
         )
-        return await ctx.send("The shadow vanished...")
+        return await ctx.send("Shadow vanished!")
 
     if name.lower() != spawn["name"].lower():
-        return await ctx.send("Wrong shadow name!")
+        return await ctx.send("Wrong name!")
 
-    if random.random() > ARISE_SUCCESS_RATE:
+    if random.random() > ARISE_SUCCESS:
         users.update_one({"user_id": ctx.author.id}, {"$inc": {"xp": 10}})
-        return await ctx.send("Arise failed! Try again!")
+        return await ctx.send("Arise failed!")
 
     user = get_user(ctx.author.id)
 
     if len(user["shadows"]) >= MAX_SLOTS:
-        return await ctx.send("Your shadow slots are full!")
+        return await ctx.send("Slots full!")
 
     count = sum(1 for s in user["shadows"] if s["name"] == spawn["name"])
     if count >= MAX_DUPES:
-        return await ctx.send("Max duplicate reached!")
+        return await ctx.send("Max duplicates reached!")
 
     users.update_one(
         {"user_id": ctx.author.id},
-        {"$push": {"shadows": {"name": spawn["name"], "rarity": spawn.get("rarity", "Unknown")}},
-         "$inc": {"xp": 75}}
+        {
+            "$push": {"shadows": spawn},
+            "$inc": {"xp": 75}
+        }
     )
 
     guilds.update_one(
@@ -205,42 +235,75 @@ async def arise(ctx, name: str):
         {"$set": {"active_spawn": None}}
     )
 
-    await ctx.send(f"{ctx.author.mention} has successfully arisen **{spawn['name']}**!")
+    await ctx.send(f"{ctx.author.mention} has arisen **{spawn['name']}**!")
 
-# ================== SHADOW ADMIN ==================
+@bot.command()
+async def arise(ctx, name: str):
+    await arise_logic(ctx, name)
+
+@bot.tree.command(name="arise")
+async def arise_slash(interaction: discord.Interaction, name: str):
+    await interaction.response.defer()
+    await arise_logic(interaction.channel, name)
+
+# ================= SHADOW ADMIN =================
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def addshadow(ctx, name, rarity, spawnchance: float, image):
+async def addshadow(ctx, name, rarity, spawnchance: float, image, defense: int, damage: int, stamina: int):
     shadows.insert_one({
         "name": name,
         "rarity": rarity,
         "spawnchance": spawnchance,
-        "image": image
+        "image": image,
+        "defense": defense,
+        "damage": damage,
+        "stamina": stamina
     })
     await ctx.send("Shadow added globally.")
 
 @bot.command()
 @commands.has_permissions(administrator=True)
-async def removeshadow(ctx, name):
-    shadows.delete_one({"name": name})
-    await ctx.send("Shadow removed.")
+async def statsshdw(ctx, name, defense: int, damage: int, stamina: int):
+    shadows.update_one(
+        {"name": name},
+        {"$set": {"defense": defense, "damage": damage, "stamina": stamina}}
+    )
+    await ctx.send("Stats updated.")
 
 @bot.command()
 async def viewshadow(ctx, name):
     shadow = shadows.find_one({"name": name})
     if not shadow:
-        return await ctx.send("Shadow not found.")
+        return await ctx.send("Not found.")
 
     embed = discord.Embed(
         title=shadow["name"],
-        description=f"Rarity: {shadow['rarity']}",
+        description=f"Rarity: {shadow['rarity']}\nDEF: {shadow['defense']}\nDMG: {shadow['damage']}\nSTM: {shadow['stamina']}",
         color=discord.Color.dark_purple()
     )
     embed.set_image(url=shadow["image"])
     await ctx.send(embed=embed)
 
-# ================== SETTINGS ==================
+# ================= PROFILE =================
+
+@bot.command()
+async def profile(ctx, member: discord.Member = None):
+    member = member or ctx.author
+    user = get_user(member.id)
+
+    required = xp_required(user["level"])
+    bar = xp_bar(user["xp"], required)
+
+    await ctx.send(
+        f"**{member.name}**\n"
+        f"Level: {user['level']}\n"
+        f"XP: {user['xp']} / {required}\n"
+        f"{bar}\n"
+        f"Shadows: {len(user['shadows'])}/{MAX_SLOTS}"
+    )
+
+# ================= SETTINGS =================
 
 @bot.command()
 @commands.has_permissions(administrator=True)
@@ -254,26 +317,12 @@ async def setpingrole(ctx, role: discord.Role):
     guilds.update_one({"guild_id": ctx.guild.id}, {"$set": {"ping_role": role.id}}, upsert=True)
     await ctx.send("Ping role set.")
 
-# ================== PROFILE ==================
-
-@bot.command()
-async def profile(ctx, member: discord.Member = None):
-    member = member or ctx.author
-    user = get_user(member.id)
-
-    await ctx.send(
-        f"**{member.name}**\n"
-        f"Level: {user['level']}\n"
-        f"XP: {user['xp']} / {xp_required(user['level'])}\n"
-        f"Shadows: {len(user['shadows'])}/{MAX_SLOTS}"
-    )
-
-# ================== HELP ==================
+# ================= HELP =================
 
 @bot.command()
 async def help(ctx):
     await ctx.send("""
-**Solo Leveling Bot Commands**
+**Solo Leveling Bot**
 
 !profile  
 !arise <name>  
@@ -281,15 +330,17 @@ async def help(ctx):
 
 Admin:
 !addshadow  
-!removeshadow  
+!statsshdw  
 !setchannelspawn  
 !setpingrole  
 """)
 
-# ==================
+# ================= READY =================
 
 @bot.event
 async def on_ready():
+    cleanup_spawns.start()
+    await bot.tree.sync()
     print(f"Logged in as {bot.user}")
 
 bot.run(TOKEN)
