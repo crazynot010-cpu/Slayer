@@ -43,6 +43,9 @@ class SpawnCog(commands.Cog):
             {"$set": {"spawn_counter": counter}}
         )
 
+        # VERY IMPORTANT (fixes command issues)
+        await self.bot.process_commands(message)
+
 
     # -------------------------
     # SPAWN SHADOW
@@ -74,7 +77,7 @@ class SpawnCog(commands.Cog):
         if channel_id:
             channel = message.guild.get_channel(int(channel_id))
         else:
-            channel = message.channel  # fallback to active channel
+            channel = message.channel  # fallback
 
         if not channel:
             return
@@ -85,7 +88,10 @@ class SpawnCog(commands.Cog):
             color=discord.Color.dark_purple()
         )
 
-        embed.add_field(name="Rarity", value=chosen.get("rarity", "Unknown"))
+        embed.add_field(
+            name="Rarity",
+            value=chosen.get("rarity", "Unknown")
+        )
 
         if chosen.get("image_url"):
             embed.set_image(url=chosen["image_url"])
@@ -121,6 +127,7 @@ class SpawnCog(commands.Cog):
             }
             await users.insert_one(user_data)
 
+        # Add shadow to user
         user_data["shadows"].append({
             "name": shadow["name"],
             "level": 1,
@@ -132,9 +139,12 @@ class SpawnCog(commands.Cog):
             {"$set": {"shadows": user_data["shadows"]}}
         )
 
-        self.active_spawns[guild_id] = None
+        # REMOVE ACTIVE SPAWN PROPERLY
+        self.active_spawns.pop(guild_id, None)
 
-        await ctx.send(f"🌑 {ctx.author.mention} captured **{shadow['name']}**!")
+        await ctx.send(
+            f"🌑 {ctx.author.mention} captured **{shadow['name']}**!"
+        )
 
 
     # -------------------------
@@ -142,7 +152,9 @@ class SpawnCog(commands.Cog):
     # -------------------------
     @commands.command()
     async def progress(self, ctx):
-        guild_data = await guilds.find_one({"guild_id": str(ctx.guild.id)})
+        guild_data = await guilds.find_one(
+            {"guild_id": str(ctx.guild.id)}
+        )
 
         counter = guild_data.get("spawn_counter", 0)
         remaining = SPAWN_THRESHOLD - counter
@@ -154,9 +166,18 @@ class SpawnCog(commands.Cog):
             color=discord.Color.blurple()
         )
 
-        embed.add_field(name="Messages", value=f"{counter}/{SPAWN_THRESHOLD}")
-        embed.add_field(name="Remaining", value=str(remaining))
-        embed.add_field(name="Active Spawn", value=active)
+        embed.add_field(
+            name="Messages",
+            value=f"{counter}/{SPAWN_THRESHOLD}"
+        )
+        embed.add_field(
+            name="Remaining",
+            value=str(remaining)
+        )
+        embed.add_field(
+            name="Active Spawn",
+            value=active
+        )
 
         await ctx.send(embed=embed)
 
@@ -173,7 +194,9 @@ class SpawnCog(commands.Cog):
             upsert=True
         )
 
-        await ctx.send(f"Spawn channel set to {channel.mention}")
+        await ctx.send(
+            f"Spawn channel set to {channel.mention}"
+        )
 
 
 async def setup(bot):
