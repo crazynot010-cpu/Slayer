@@ -2,7 +2,7 @@ import discord
 import random
 from discord.ext import commands
 from discord import app_commands
-from db import users, guilds, shadows
+from database import users, guilds, shadows
 
 
 SPAWN_THRESHOLD = 40
