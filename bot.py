@@ -1,24 +1,25 @@
 import discord
 from discord.ext import commands
-import os
-from dotenv import load_dotenv
-from config import PREFIX
-
-load_dotenv()
+from core.config import TOKEN, PREFIX
+from core.database import db
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix=PREFIX, intents=intents)
+
+bot.db = db
 
 @bot.event
 async def on_ready():
     await bot.tree.sync()
     print(f"Logged in as {bot.user}")
 
-async def main():
-    async with bot:
-        await bot.load_extension("cogs.events")
-        await bot.load_extension("cogs.spawn")
-        await bot.start(os.getenv("TOKEN"))
+async def load():
+    await bot.load_extension("cogs.leveling")
+    await bot.load_extension("cogs.spawn")
+    await bot.load_extension("cogs.shadows")
+    await bot.load_extension("cogs.profile")
+    await bot.load_extension("cogs.admin")
 
 import asyncio
-asyncio.run(main())
+asyncio.run(load())
+bot.run(TOKEN)
