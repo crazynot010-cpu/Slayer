@@ -1,8 +1,11 @@
 import discord
+import random
 from discord.ext import commands
 from discord import app_commands
-import random
 from db import users, guilds, shadows
+
+
+SPAWN_THRESHOLD = 40
 
 
 class SpawnCog(commands.Cog):
@@ -33,7 +36,7 @@ class SpawnCog(commands.Cog):
             }
             await guilds.insert_one(guild_data)
 
-        # ---------------- XP SYSTEM ----------------
+        # -------- XP SYSTEM --------
         xp_gain = guild_data.get("xp_per_msg", 5)
 
         user_data = await users.find_one({"user_id": user_id})
@@ -49,7 +52,6 @@ class SpawnCog(commands.Cog):
         new_xp = user_data["xp"] + xp_gain
         level = user_data["level"]
         xp_needed = level * 100
-
         level_up = False
 
         if new_xp >= xp_needed:
@@ -70,11 +72,11 @@ class SpawnCog(commands.Cog):
             )
             await message.channel.send(embed=embed)
 
-        # ---------------- SPAWN SYSTEM ----------------
+        # -------- SPAWN COUNTER --------
         counter = guild_data.get("spawn_counter", 0) + 1
 
-        if counter >= 40:
-            await self.spawn_shadow(message.guild, message.channel)
+        if counter >= SPAWN_THRESHOLD:
+            await self.spawn_shadow(message.guild)
             counter = 0
 
         await guilds.update_one(
@@ -86,11 +88,11 @@ class SpawnCog(commands.Cog):
     # --------------------------
     # SPAWN SHADOW
     # --------------------------
-    async def spawn_shadow(self, guild, channel):
+    async def spawn_shadow(self, guild):
         guild_id = str(guild.id)
 
         if guild_id in self.active_spawns:
-            return  # already active
+            return
 
         shadow_list = await shadows.find({"enabled": True}).to_list(None)
         if not shadow_list:
@@ -101,14 +103,13 @@ class SpawnCog(commands.Cog):
             weighted_pool.extend([s] * s["spawn_rate"])
 
         chosen = random.choice(weighted_pool)
-
         self.active_spawns[guild_id] = chosen
 
         guild_data = await guilds.find_one({"guild_id": guild_id})
-        spawn_channel_id = guild_data.get("spawn_channel")
+        channel = guild.get_channel(guild_data.get("spawn_channel")) or guild.system_channel
 
-        if spawn_channel_id:
-            channel = guild.get_channel(spawn_channel_id)
+        if not channel:
+            return
 
         embed = discord.Embed(
             title="⚔️ A Shadow Has Appeared!",
@@ -116,7 +117,7 @@ class SpawnCog(commands.Cog):
             color=discord.Color.dark_purple()
         )
         embed.set_image(url=chosen["image_url"])
-        embed.add_field(name="Hint", value=f"Rarity: **{chosen['rarity']}**")
+        embed.add_field(name="Rarity", value=chosen["rarity"])
 
         content = guild_data.get("spawn_ping") or ""
 
@@ -128,7 +129,7 @@ class SpawnCog(commands.Cog):
     # --------------------------
     @commands.command(name="arise")
     async def arise_prefix(self, ctx, *, guess: str):
-        await self.handle_arise(ctx.guild.id, ctx.author, ctx.channel, guess)
+        await self.handle_arise(ctx.guild, ctx.author, ctx.channel, guess)
 
 
     # --------------------------
@@ -136,24 +137,32 @@ class SpawnCog(commands.Cog):
     # --------------------------
     @app_commands.command(name="arise", description="Capture the spawned shadow")
     async def arise_slash(self, interaction: discord.Interaction, guess: str):
-        await interaction.response.defer()
-        await self.handle_arise(interaction.guild.id, interaction.user, interaction.channel, guess)
-        await interaction.followup.send("Processed.")
+        if not interaction.guild:
+            return await interaction.response.send_message("Guild only.", ephemeral=True)
+
+        result = await self.handle_arise(
+            interaction.guild,
+            interaction.user,
+            interaction.channel,
+            guess
+        )
+
+        await interaction.response.send_message(result)
 
 
     # --------------------------
-    # HANDLE ARISE LOGIC
+    # HANDLE ARISE
     # --------------------------
-    async def handle_arise(self, guild_id, user, channel, guess):
-        guild_id = str(guild_id)
+    async def handle_arise(self, guild, user, channel, guess):
+        guild_id = str(guild.id)
 
         if guild_id not in self.active_spawns:
-            return await channel.send("No active shadow.")
+            return "No active shadow."
 
         shadow_data = self.active_spawns[guild_id]
 
         if guess.lower() != shadow_data["name"].lower():
-            return await channel.send("❌ Wrong name.")
+            return "❌ Wrong name."
 
         user_id = str(user.id)
         user_data = await users.find_one({"user_id": user_id})
@@ -185,6 +194,46 @@ class SpawnCog(commands.Cog):
             description=f"{user.mention} captured **{shadow_data['name']}**!",
             color=discord.Color.purple()
         )
+
+        await channel.send(embed=embed)
+        return "Shadow captured!"
+
+
+    # --------------------------
+    # PROGRESS COMMAND
+    # --------------------------
+    @commands.command(name="progress")
+    async def progress_prefix(self, ctx):
+        await self.show_progress(ctx.guild, ctx.channel)
+
+
+    @app_commands.command(name="progress", description="See spawn progress")
+    async def progress_slash(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        await self.show_progress(interaction.guild, interaction.channel)
+        await interaction.followup.send("Progress shown.")
+
+
+    async def show_progress(self, guild, channel):
+        guild_data = await guilds.find_one({"guild_id": str(guild.id)})
+        counter = guild_data.get("spawn_counter", 0)
+        remaining = max(0, SPAWN_THRESHOLD - counter)
+
+        percent = int((counter / SPAWN_THRESHOLD) * 100)
+        filled = int(counter / 4)
+        bar = "█" * filled + "░" * (10 - filled)
+
+        active = "Yes" if str(guild.id) in self.active_spawns else "No"
+
+        embed = discord.Embed(
+            title="📊 Shadow Spawn Progress",
+            color=discord.Color.blurple()
+        )
+
+        embed.add_field(name="Progress", value=f"`{bar}` {percent}%", inline=False)
+        embed.add_field(name="Messages", value=f"{counter}/{SPAWN_THRESHOLD}", inline=True)
+        embed.add_field(name="Remaining", value=str(remaining), inline=True)
+        embed.add_field(name="Active Spawn", value=active, inline=False)
 
         await channel.send(embed=embed)
 
