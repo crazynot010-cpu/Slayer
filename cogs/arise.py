@@ -1,0 +1,138 @@
+import discord
+import random
+
+from discord.ext import commands
+from discord import app_commands
+
+from database import guilds, users, shadows
+from utils.calculations import xp_required
+from utils.rank_utils import get_rank_from_level
+
+
+BASE_SUCCESS_RATE = 0.55
+MAX_SLOTS = 16
+MAX_DUPES = 3
+SUCCESS_XP_REWARD = 50
+
+
+class AriseCog(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    async def ensure_user(self, user_id: int, guild_id: int):
+        user = await users.find_one({"user_id": user_id, "guild_id": guild_id})
+        if not user:
+            await users.insert_one({
+                "user_id": user_id,
+                "guild_id": guild_id,
+                "xp": 0,
+                "level": 1,
+                "rank": "E",
+                "last_xp_time": 0,
+                "shadows": [],
+                "attempts": 0,
+                "successes": 0
+            })
+
+    async def attempt_arise(self, member: discord.Member):
+        guild_data = await guilds.find_one({"guild_id": member.guild.id})
+
+        active = guild_data.get("active_spawn")
+        if not active:
+            return "No active shadow.", False
+
+        if active.get("claimed_by"):
+            return "This shadow has already been claimed.", False
+
+        await self.ensure_user(member.id, member.guild.id)
+        user = await users.find_one({
+            "user_id": member.id,
+            "guild_id": member.guild.id
+        })
+
+        inventory = user["shadows"]
+
+        if len(inventory) >= MAX_SLOTS:
+            return "You have reached the max shadow slots (16).", False
+
+        dupes = sum(1 for s in inventory if s["name"] == active["name"])
+        if dupes >= MAX_DUPES:
+            return "You already own 3 duplicates of this shadow.", False
+
+        success = random.random() <= BASE_SUCCESS_RATE
+
+        await users.update_one(
+            {"_id": user["_id"]},
+            {"$inc": {"attempts": 1}}
+        )
+
+        if not success:
+            return "❌ Arise failed. You may try again before despawn.", False
+
+        # ATOMIC CLAIM LOCK
+        result = await guilds.update_one(
+            {
+                "guild_id": member.guild.id,
+                "active_spawn.claimed_by": None
+            },
+            {
+                "$set": {"active_spawn.claimed_by": member.id}
+            }
+        )
+
+        if result.modified_count == 0:
+            return "Too late. Someone else claimed it.", False
+
+        # Add shadow to user
+        new_shadow = {
+            "name": active["name"],
+            "rarity": active["rarity"],
+            "base_power": active["base_power"],
+            "level": 1,
+            "trait": None
+        }
+
+        await users.update_one(
+            {"_id": user["_id"]},
+            {
+                "$push": {"shadows": new_shadow},
+                "$inc": {"successes": 1}
+            }
+        )
+
+        # XP reward
+        new_xp = user["xp"] + SUCCESS_XP_REWARD
+        level = user["level"]
+
+        while new_xp >= xp_required(level):
+            new_xp -= xp_required(level)
+            level += 1
+
+        new_rank = get_rank_from_level(level)
+
+        await users.update_one(
+            {"_id": user["_id"]},
+            {
+                "$set": {
+                    "xp": new_xp,
+                    "level": level,
+                    "rank": new_rank
+                }
+            }
+        )
+
+        return f"🔥 SUCCESS! {active['name']} has joined your army!", True
+
+    @commands.command(name="arise")
+    async def arise_prefix(self, ctx):
+        message, success = await self.attempt_arise(ctx.author)
+        await ctx.send(message)
+
+    @app_commands.command(name="arise", description="Attempt to claim active shadow")
+    async def arise_slash(self, interaction: discord.Interaction):
+        message, success = await self.attempt_arise(interaction.user)
+        await interaction.response.send_message(message)
+
+
+async def setup(bot):
+    await bot.add_cog(AriseCog(bot))
