@@ -12,7 +12,7 @@ from pymongo import MongoClient
 # =============================
 
 TOKEN = os.getenv("TOKEN")
-MONGO_URI = os.getenv("MONGO_URI")
+MONGO_URI = os.getenv("MONGO_URL")
 
 XP_COOLDOWN = 60  # seconds
 
