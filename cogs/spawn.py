@@ -43,9 +43,6 @@ class SpawnCog(commands.Cog):
             {"$set": {"spawn_counter": counter}}
         )
 
-        # VERY IMPORTANT (fixes command issues)
-        await self.bot.process_commands(message)
-
 
     # -------------------------
     # SPAWN SHADOW
@@ -53,8 +50,8 @@ class SpawnCog(commands.Cog):
     async def spawn_shadow(self, message: discord.Message):
         guild_id = str(message.guild.id)
 
-        # prevent double spawn
-        if self.active_spawns.get(guild_id):
+        # Prevent double spawn
+        if guild_id in self.active_spawns:
             return
 
         shadow_list = await shadows.find({"enabled": True}).to_list(None)
@@ -70,14 +67,13 @@ class SpawnCog(commands.Cog):
         chosen = random.choice(weighted_pool)
         self.active_spawns[guild_id] = chosen
 
-        # determine channel
         guild_data = await guilds.find_one({"guild_id": guild_id})
         channel_id = guild_data.get("spawn_channel")
 
         if channel_id:
             channel = message.guild.get_channel(int(channel_id))
         else:
-            channel = message.channel  # fallback
+            channel = message.channel
 
         if not channel:
             return
@@ -127,7 +123,7 @@ class SpawnCog(commands.Cog):
             }
             await users.insert_one(user_data)
 
-        # Add shadow to user
+        # Add shadow
         user_data["shadows"].append({
             "name": shadow["name"],
             "level": 1,
@@ -139,7 +135,7 @@ class SpawnCog(commands.Cog):
             {"$set": {"shadows": user_data["shadows"]}}
         )
 
-        # REMOVE ACTIVE SPAWN PROPERLY
+        # Remove active spawn completely
         self.active_spawns.pop(guild_id, None)
 
         await ctx.send(
@@ -159,7 +155,7 @@ class SpawnCog(commands.Cog):
         counter = guild_data.get("spawn_counter", 0)
         remaining = SPAWN_THRESHOLD - counter
 
-        active = "Yes" if self.active_spawns.get(str(ctx.guild.id)) else "No"
+        active = "Yes" if str(ctx.guild.id) in self.active_spawns else "No"
 
         embed = discord.Embed(
             title="📊 Spawn Progress",
