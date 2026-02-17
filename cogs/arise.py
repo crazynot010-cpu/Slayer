@@ -4,7 +4,7 @@ import random
 from discord.ext import commands
 from discord import app_commands
 
-from database import guilds, users, shadows
+from database import guilds, users
 from utils.calculations import xp_required
 from utils.rank_utils import get_rank_from_level
 
@@ -35,7 +35,11 @@ class AriseCog(commands.Cog):
             })
 
     async def attempt_arise(self, member: discord.Member):
-        guild_data = await guilds.find_one({"guild_id": member.guild.id})
+        guild_id = member.guild.id
+
+        guild_data = await guilds.find_one({"guild_id": guild_id})
+        if not guild_data:
+            return "No active shadow.", False
 
         active = guild_data.get("active_spawn")
         if not active:
@@ -44,17 +48,20 @@ class AriseCog(commands.Cog):
         if active.get("claimed_by"):
             return "This shadow has already been claimed.", False
 
-        await self.ensure_user(member.id, member.guild.id)
+        await self.ensure_user(member.id, guild_id)
+
         user = await users.find_one({
             "user_id": member.id,
-            "guild_id": member.guild.id
+            "guild_id": guild_id
         })
 
-        inventory = user["shadows"]
+        inventory = user.get("shadows", [])
 
+        # Slot limit
         if len(inventory) >= MAX_SLOTS:
             return "You have reached the max shadow slots (16).", False
 
+        # Duplicate limit
         dupes = sum(1 for s in inventory if s["name"] == active["name"])
         if dupes >= MAX_DUPES:
             return "You already own 3 duplicates of this shadow.", False
@@ -69,10 +76,10 @@ class AriseCog(commands.Cog):
         if not success:
             return "❌ Arise failed. You may try again before despawn.", False
 
-        # ATOMIC CLAIM LOCK
+        # 🔒 Atomic claim
         result = await guilds.update_one(
             {
-                "guild_id": member.guild.id,
+                "guild_id": guild_id,
                 "active_spawn.claimed_by": None
             },
             {
@@ -83,7 +90,7 @@ class AriseCog(commands.Cog):
         if result.modified_count == 0:
             return "Too late. Someone else claimed it.", False
 
-        # Add shadow to user
+        # Add shadow to inventory
         new_shadow = {
             "name": active["name"],
             "rarity": active["rarity"],
@@ -100,7 +107,7 @@ class AriseCog(commands.Cog):
             }
         )
 
-        # XP reward
+        # XP logic
         new_xp = user["xp"] + SUCCESS_XP_REWARD
         level = user["level"]
 
@@ -121,7 +128,13 @@ class AriseCog(commands.Cog):
             }
         )
 
-        return f"🔥 SUCCESS! {active['name']} has joined your army!", True
+        # ✅ CLEAR ACTIVE SPAWN AFTER SUCCESS
+        await guilds.update_one(
+            {"guild_id": guild_id},
+            {"$set": {"active_spawn": None}}
+        )
+
+        return f"🔥 SUCCESS! **{active['name']}** has joined your army!", True
 
     @commands.command(name="arise")
     async def arise_prefix(self, ctx):
