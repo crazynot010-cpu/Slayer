@@ -136,12 +136,12 @@ class AriseCog(commands.Cog):
 
         return f"🔥 SUCCESS! **{active['name']}** has joined your army!", True
 
-    @commands.command(name="arise")
-    async def arise_prefix(self, ctx):
-        message, success = await self.attempt_arise(ctx.author)
-        await ctx.send(message)
-
     
+
+    @app_commands.command(name="arise", description="Attempt to claim active shadow")
+    async def arise_slash(self, interaction: discord.Interaction):
+        message, success = await self.attempt_arise(interaction.user)
+        await interaction.response.send
 
 
 async def setup(bot):
