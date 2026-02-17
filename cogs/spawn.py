@@ -1,7 +1,7 @@
 import discord
 import random
 from discord.ext import commands
-from database import users, guilds, shadows
+from database import guilds, shadows
 
 SPAWN_THRESHOLD = 10
 
@@ -9,8 +9,6 @@ SPAWN_THRESHOLD = 10
 class SpawnCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.active_spawns = {}  # guild_id -> shadow_data
-
 
     # -------------------------
     # MESSAGE LISTENER
@@ -20,7 +18,7 @@ class SpawnCog(commands.Cog):
         if message.author.bot or not message.guild:
             return
 
-        guild_id = str(message.guild.id)
+        guild_id = message.guild.id
 
         guild_data = await guilds.find_one({"guild_id": guild_id})
 
@@ -28,14 +26,19 @@ class SpawnCog(commands.Cog):
             guild_data = {
                 "guild_id": guild_id,
                 "spawn_channel": None,
-                "spawn_counter": 0
+                "spawn_counter": 0,
+                "active_spawn": None
             }
             await guilds.insert_one(guild_data)
+
+        # If a shadow is already active → don't count messages
+        if guild_data.get("active_spawn"):
+            return
 
         counter = guild_data.get("spawn_counter", 0) + 1
 
         if counter >= SPAWN_THRESHOLD:
-            await self.spawn_shadow(message)
+            await self.spawn_shadow(message.guild, message.channel)
             counter = 0
 
         await guilds.update_one(
@@ -43,16 +46,11 @@ class SpawnCog(commands.Cog):
             {"$set": {"spawn_counter": counter}}
         )
 
-
     # -------------------------
     # SPAWN SHADOW
     # -------------------------
-    async def spawn_shadow(self, message: discord.Message):
-        guild_id = str(message.guild.id)
-
-        # Prevent double spawn
-        if guild_id in self.active_spawns:
-            return
+    async def spawn_shadow(self, guild: discord.Guild, fallback_channel: discord.TextChannel):
+        guild_id = guild.id
 
         shadow_list = await shadows.find({"enabled": True}).to_list(None)
 
@@ -65,22 +63,36 @@ class SpawnCog(commands.Cog):
             weighted_pool.extend([s] * s.get("spawn_rate", 1))
 
         chosen = random.choice(weighted_pool)
-        self.active_spawns[guild_id] = chosen
+
+        # Save to MongoDB
+        await guilds.update_one(
+            {"guild_id": guild_id},
+            {
+                "$set": {
+                    "active_spawn": {
+                        "name": chosen["name"],
+                        "rarity": chosen["rarity"],
+                        "base_power": chosen.get("base_power", 0),
+                        "claimed_by": None
+                    }
+                }
+            }
+        )
 
         guild_data = await guilds.find_one({"guild_id": guild_id})
         channel_id = guild_data.get("spawn_channel")
 
         if channel_id:
-            channel = message.guild.get_channel(int(channel_id))
+            channel = guild.get_channel(int(channel_id))
         else:
-            channel = message.channel
+            channel = fallback_channel
 
         if not channel:
             return
 
         embed = discord.Embed(
             title="⚔️ A Shadow Has Appeared!",
-            description="Type `!arise <name>` to capture it!",
+            description=f"Type `!arise` to capture **{chosen['name']}**!",
             color=discord.Color.dark_purple()
         )
 
@@ -94,89 +106,31 @@ class SpawnCog(commands.Cog):
 
         await channel.send(embed=embed)
 
-
-    # -------------------------
-    # ARISE COMMAND
-    # -------------------------
-    @commands.command()
-    async def arise(self, ctx, *, guess: str):
-        guild_id = str(ctx.guild.id)
-
-        shadow = self.active_spawns.get(guild_id)
-
-        if not shadow:
-            return await ctx.send("❌ No active shadow.")
-
-        if guess.lower() != shadow["name"].lower():
-            return await ctx.send("❌ Wrong name.")
-
-        user_id = str(ctx.author.id)
-
-        user_data = await users.find_one({"user_id": user_id})
-
-        if not user_data:
-            user_data = {
-                "user_id": user_id,
-                "level": 1,
-                "xp": 0,
-                "shadows": []
-            }
-            await users.insert_one(user_data)
-
-        # Add shadow
-        user_data["shadows"].append({
-            "name": shadow["name"],
-            "level": 1,
-            "xp": 0
-        })
-
-        await users.update_one(
-            {"user_id": user_id},
-            {"$set": {"shadows": user_data["shadows"]}}
-        )
-
-        # Remove active spawn completely
-        self.active_spawns.pop(guild_id, None)
-
-        await ctx.send(
-            f"🌑 {ctx.author.mention} captured **{shadow['name']}**!"
-        )
-
-
     # -------------------------
     # PROGRESS COMMAND
     # -------------------------
     @commands.command()
     async def progress(self, ctx):
-        guild_data = await guilds.find_one(
-            {"guild_id": str(ctx.guild.id)}
-        )
+        guild_data = await guilds.find_one({"guild_id": ctx.guild.id})
+
+        if not guild_data:
+            return await ctx.send("No data for this server yet.")
 
         counter = guild_data.get("spawn_counter", 0)
-        remaining = SPAWN_THRESHOLD - counter
+        remaining = max(0, SPAWN_THRESHOLD - counter)
 
-        active = "Yes" if str(ctx.guild.id) in self.active_spawns else "No"
+        active = "Yes" if guild_data.get("active_spawn") else "No"
 
         embed = discord.Embed(
             title="📊 Spawn Progress",
             color=discord.Color.blurple()
         )
 
-        embed.add_field(
-            name="Messages",
-            value=f"{counter}/{SPAWN_THRESHOLD}"
-        )
-        embed.add_field(
-            name="Remaining",
-            value=str(remaining)
-        )
-        embed.add_field(
-            name="Active Spawn",
-            value=active
-        )
+        embed.add_field(name="Messages", value=f"{counter}/{SPAWN_THRESHOLD}")
+        embed.add_field(name="Remaining", value=str(remaining))
+        embed.add_field(name="Active Spawn", value=active)
 
         await ctx.send(embed=embed)
-
 
     # -------------------------
     # SET SPAWN CHANNEL
@@ -185,14 +139,12 @@ class SpawnCog(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def setspawnchannel(self, ctx, channel: discord.TextChannel):
         await guilds.update_one(
-            {"guild_id": str(ctx.guild.id)},
+            {"guild_id": ctx.guild.id},
             {"$set": {"spawn_channel": channel.id}},
             upsert=True
         )
 
-        await ctx.send(
-            f"Spawn channel set to {channel.mention}"
-        )
+        await ctx.send(f"Spawn channel set to {channel.mention}")
 
 
 async def setup(bot):
