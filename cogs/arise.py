@@ -139,10 +139,14 @@ class AriseCog(commands.Cog):
     
 
     @app_commands.command(name="arise", description="Attempt to claim active shadow")
-    async def arise_slash(self, interaction: discord.Interaction):
-        message, success = await self.attempt_arise(interaction.user)
-        await interaction.response.send
+async def arise_slash(self, interaction: discord.Interaction):
+    message, success = await self.attempt_arise(interaction.user)
 
+    if not interaction.response.is_done():
+        await interaction.response.send_message(message)
+    else:
+        await interaction.followup.send(message) 
+        
 
 async def setup(bot):
     await bot.add_cog(AriseCog(bot))
