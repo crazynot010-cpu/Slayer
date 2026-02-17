@@ -4,14 +4,13 @@ from discord.ext import commands
 from discord import app_commands
 from database import users, guilds, shadows
 
-
 SPAWN_THRESHOLD = 40
 
 
 class SpawnCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.active_spawns = {}  # guild_id -> shadow_data
+        self.active_spawns = {}  # guild_id -> shadow_data or None
 
 
     # --------------------------
@@ -25,6 +24,7 @@ class SpawnCog(commands.Cog):
         guild_id = str(message.guild.id)
         user_id = str(message.author.id)
 
+        # ---------------- GUILD SETUP ----------------
         guild_data = await guilds.find_one({"guild_id": guild_id})
         if not guild_data:
             guild_data = {
@@ -36,7 +36,7 @@ class SpawnCog(commands.Cog):
             }
             await guilds.insert_one(guild_data)
 
-        # -------- XP SYSTEM --------
+        # ---------------- XP SYSTEM ----------------
         xp_gain = guild_data.get("xp_per_msg", 5)
 
         user_data = await users.find_one({"user_id": user_id})
@@ -72,10 +72,11 @@ class SpawnCog(commands.Cog):
             )
             await message.channel.send(embed=embed)
 
-        # -------- SPAWN COUNTER --------
+        # ---------------- SPAWN COUNTER ----------------
         counter = guild_data.get("spawn_counter", 0) + 1
 
-        if counter >= SPAWN_THRESHOLD:
+        # Only spawn if no active shadow
+        if counter >= SPAWN_THRESHOLD and not self.active_spawns.get(guild_id):
             await self.spawn_shadow(message.guild)
             counter = 0
 
@@ -91,7 +92,7 @@ class SpawnCog(commands.Cog):
     async def spawn_shadow(self, guild):
         guild_id = str(guild.id)
 
-        if guild_id in self.active_spawns:
+        if self.active_spawns.get(guild_id) is not None:
             return
 
         shadow_list = await shadows.find({"enabled": True}).to_list(None)
@@ -100,15 +101,28 @@ class SpawnCog(commands.Cog):
 
         weighted_pool = []
         for s in shadow_list:
-            weighted_pool.extend([s] * s["spawn_rate"])
+            weighted_pool.extend([s] * s.get("spawn_rate", 1))
 
         chosen = random.choice(weighted_pool)
         self.active_spawns[guild_id] = chosen
 
         guild_data = await guilds.find_one({"guild_id": guild_id})
-        channel = guild.get_channel(guild_data.get("spawn_channel")) or guild.system_channel
+
+        # SAFE CHANNEL FETCH
+        channel = None
+        channel_id = guild_data.get("spawn_channel")
+
+        if channel_id:
+            try:
+                channel = guild.get_channel(int(channel_id))
+            except:
+                channel = None
 
         if not channel:
+            channel = guild.system_channel
+
+        if not channel:
+            print(f"❌ No valid spawn channel in guild {guild.name}")
             return
 
         embed = discord.Embed(
@@ -116,8 +130,10 @@ class SpawnCog(commands.Cog):
             description="Type `/arise <name>` or `!arise <name>` to capture it!",
             color=discord.Color.dark_purple()
         )
-        embed.set_image(url=chosen["image_url"])
-        embed.add_field(name="Rarity", value=chosen["rarity"])
+
+        embed.set_image(url=chosen.get("image_url"))
+        embed.add_field(name="Name", value=chosen.get("name"), inline=True)
+        embed.add_field(name="Rarity", value=chosen.get("rarity", "Unknown"), inline=True)
 
         content = guild_data.get("spawn_ping") or ""
 
@@ -129,7 +145,8 @@ class SpawnCog(commands.Cog):
     # --------------------------
     @commands.command(name="arise")
     async def arise_prefix(self, ctx, *, guess: str):
-        await self.handle_arise(ctx.guild, ctx.author, ctx.channel, guess)
+        result = await self.handle_arise(ctx.guild, ctx.author, ctx.channel, guess)
+        await ctx.send(result)
 
 
     # --------------------------
@@ -156,10 +173,10 @@ class SpawnCog(commands.Cog):
     async def handle_arise(self, guild, user, channel, guess):
         guild_id = str(guild.id)
 
-        if guild_id not in self.active_spawns:
-            return "No active shadow."
+        shadow_data = self.active_spawns.get(guild_id)
 
-        shadow_data = self.active_spawns[guild_id]
+        if not shadow_data:
+            return "❌ No active shadow."
 
         if guess.lower() != shadow_data["name"].lower():
             return "❌ Wrong name."
@@ -187,7 +204,7 @@ class SpawnCog(commands.Cog):
             {"$set": {"shadows": user_data["shadows"]}}
         )
 
-        del self.active_spawns[guild_id]
+        self.active_spawns[guild_id] = None
 
         embed = discord.Embed(
             title="🌑 Shadow Arisen!",
@@ -196,6 +213,7 @@ class SpawnCog(commands.Cog):
         )
 
         await channel.send(embed=embed)
+
         return "Shadow captured!"
 
 
@@ -223,7 +241,7 @@ class SpawnCog(commands.Cog):
         filled = int(counter / 4)
         bar = "█" * filled + "░" * (10 - filled)
 
-        active = "Yes" if str(guild.id) in self.active_spawns else "No"
+        active = "Yes" if self.active_spawns.get(str(guild.id)) else "No"
 
         embed = discord.Embed(
             title="📊 Shadow Spawn Progress",
@@ -261,28 +279,6 @@ class SpawnCog(commands.Cog):
             upsert=True
         )
         await ctx.send("Spawn ping set.")
-
-
-    @commands.command()
-    @commands.has_permissions(administrator=True)
-    async def setxppermsg(self, ctx, amount: int):
-        await guilds.update_one(
-            {"guild_id": str(ctx.guild.id)},
-            {"$set": {"xp_per_msg": amount}},
-            upsert=True
-        )
-        await ctx.send("XP per message updated.")
-
-
-    @commands.command()
-    @commands.has_permissions(administrator=True)
-    async def setlevel(self, ctx, member: discord.Member, level: int):
-        await users.update_one(
-            {"user_id": str(member.id)},
-            {"$set": {"level": level}},
-            upsert=True
-        )
-        await ctx.send(f"{member.mention} level set to {level}.")
 
 
 async def setup(bot):
