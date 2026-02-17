@@ -22,7 +22,6 @@ COGS = [
     "cogs.admin",
     "cogs.stats",
     "cogs.help",
-    "cogs.shadow",
 ]
 
 
