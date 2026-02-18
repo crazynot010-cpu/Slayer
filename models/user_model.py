@@ -5,16 +5,17 @@ class UserModel:
 
     @staticmethod
     async def get_user(user_id: int, guild_id: int):
-        user = await users_collection.find_one(
-            {"user_id": user_id, "guild_id": guild_id}
-        )
+        user = await users_collection.find_one({
+            "user_id": user_id,
+            "guild_id": guild_id
+        })
 
         if not user:
             user = {
                 "user_id": user_id,
                 "guild_id": guild_id,
-                "level": 1,
                 "xp": 0,
+                "level": 1,
                 "shadows": []
             }
             await users_collection.insert_one(user)
@@ -22,9 +23,12 @@ class UserModel:
         return user
 
     @staticmethod
-    async def add_xp(user_id: int, guild_id: int, amount: int):
+    async def update_user(user_id: int, guild_id: int, data: dict):
         await users_collection.update_one(
-            {"user_id": user_id, "guild_id": guild_id},
-            {"$inc": {"xp": amount}},
+            {
+                "user_id": user_id,
+                "guild_id": guild_id
+            },
+            {"$set": data},
             upsert=True
         )
