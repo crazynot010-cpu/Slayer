@@ -7,7 +7,7 @@ TOKEN = os.getenv("TOKEN")
 MONGO_URI = os.getenv("MONGO_URI")
 
 if not TOKEN:
-    raise ValueError("TOKEN environment variable is not set.")
+    raise ValueError("TOKEN environment variable not set.")
 
 if not MONGO_URI:
-    raise ValueError("MONGO_URI environment variable is not set.")
+    raise ValueError("MONGO_URI environment variable not set.")
