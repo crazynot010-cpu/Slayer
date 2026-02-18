@@ -9,7 +9,7 @@ from systems.arise_system import AriseSystem
 from systems.xp_system import XPSystem
 
 
-XP_PER_MESSAGE = 5
+XP_PER_MESSAGE = 25
 
 
 class SoloLevelingBot(commands.Bot):
@@ -190,3 +190,48 @@ class SoloLevelingBot(commands.Bot):
         )
 
         await interaction.response.send_message("Background updated.")
+@app_commands.command(name="inventory", description="View your shadows")
+async def inventory(self, interaction: discord.Interaction):
+
+    user = await UserModel.get(interaction.user.id, interaction.guild.id)
+    shadows = user.get("shadows", [])
+
+    if not shadows:
+        return await interaction.response.send_message("You own no shadows.")
+
+    shadow_list = {}
+
+    for s in shadows:
+        shadow_list[s] = shadow_list.get(s, 0) + 1
+
+    desc = "\n".join([f"{name} x{count}" for name, count in shadow_list.items()])
+
+    embed = discord.Embed(
+        title=f"{interaction.user.display_name}'s Shadows",
+        description=desc,
+        color=discord.Color.dark_purple()
+    )
+
+    await interaction.response.send_message(embed=embed)
+    @app_commands.command(name="leaderboard", description="Top hunters")
+async def leaderboard(self, interaction: discord.Interaction):
+
+    top_users = await UserModel.leaderboard(interaction.guild.id)
+
+    if not top_users:
+        return await interaction.response.send_message("No data.")
+
+    desc = ""
+
+    for i, user in enumerate(top_users, start=1):
+        member = interaction.guild.get_member(user["user_id"])
+        name = member.display_name if member else "Unknown"
+        desc += f"**{i}.** {name} — Level {user['level']}\n"
+
+    embed = discord.Embed(
+        title="Hunter Leaderboard",
+        description=desc,
+        color=discord.Color.gold()
+    )
+
+    await interaction.response.send_message(embed=embed)
