@@ -32,19 +32,30 @@ class SoloLevelingBot(commands.Bot):
         )
 
     # ==========================================
-    # FIXED SLASH SYNC (INSTANT)
+    # SLASH SYNC (FIXED + REGISTERED)
     # ==========================================
     async def setup_hook(self):
 
         guild = discord.Object(id=GUILD_ID)
 
-        # Clear previous guild commands
+        # Clear old guild commands
         self.tree.clear_commands(guild=guild)
 
-        # Sync instantly to your server
-        await self.tree.sync(guild=guild)
+        # Manually register commands
+        self.tree.add_command(self.addshadow, guild=guild)
+        self.tree.add_command(self.removeshadow, guild=guild)
+        self.tree.add_command(self.statsshdw, guild=guild)
+        self.tree.add_command(self.setspawnchannel, guild=guild)
+        self.tree.add_command(self.setspawnping, guild=guild)
+        self.tree.add_command(self.arise, guild=guild)
+        self.tree.add_command(self.profile, guild=guild)
+        self.tree.add_command(self.setbackground, guild=guild)
+        self.tree.add_command(self.inventory, guild=guild)
+        self.tree.add_command(self.leaderboard, guild=guild)
 
-        print("Instant guild slash sync complete.")
+        synced = await self.tree.sync(guild=guild)
+
+        print(f"Instant guild slash sync complete. Synced {len(synced)} commands.")
 
     async def on_ready(self):
         print(f"Logged in as {self.user} (ID: {self.user.id})")
@@ -59,12 +70,11 @@ class SoloLevelingBot(commands.Bot):
         guild_id = message.guild.id
         user_id = message.author.id
 
-        # XP
+        # Add XP
         await XPSystem.add_xp(user_id, guild_id, XP_PER_MESSAGE, message.author)
 
-        # Spawn counter
+        # Spawn logic
         await SpawnSystem.increment_message(guild_id)
-
         spawn = await SpawnSystem.try_spawn(guild_id)
 
         if spawn:
@@ -90,7 +100,7 @@ class SoloLevelingBot(commands.Bot):
 
             sent_msg = await channel.send(content=ping_text, embed=embed)
 
-            expire_time = int(time.time()) + 120
+            expire_time = int(time.time()) + 120  # 2 minutes
 
             await GuildModel.update(
                 guild_id,
@@ -253,11 +263,11 @@ class SoloLevelingBot(commands.Bot):
         if not shadows:
             return await interaction.response.send_message("You own no shadows.")
 
-        shadow_list = {}
+        shadow_count = {}
         for s in shadows:
-            shadow_list[s] = shadow_list.get(s, 0) + 1
+            shadow_count[s] = shadow_count.get(s, 0) + 1
 
-        desc = "\n".join([f"{name} x{count}" for name, count in shadow_list.items()])
+        desc = "\n".join([f"{name} x{count}" for name, count in shadow_count.items()])
 
         embed = discord.Embed(
             title=f"{interaction.user.display_name}'s Shadows",
