@@ -31,11 +31,13 @@ class Profile(commands.Cog):
         shadow_count = len(user["shadows"])
 
         embed = discord.Embed(
-            title=f"{member.display_name}'s Hunter Profile",
             color=0x2f3136
         )
 
-        embed.set_thumbnail(url=member.display_avatar.url)
+        embed.set_author(
+            name=f"{member.display_name}'s Hunter Profile",
+            icon_url=member.display_avatar.url
+        )
 
         embed.add_field(
             name="Level",
@@ -55,7 +57,41 @@ class Profile(commands.Cog):
             inline=True
         )
 
+        # Background image
+        if user.get("background"):
+            embed.set_image(url=user["background"])
+
         await interaction.response.send_message(embed=embed)
+
+    # ---------------------------
+    # SET PROFILE BACKGROUND
+    # ---------------------------
+
+    @app_commands.command(
+        name="background",
+        description="Set your profile background image"
+    )
+    async def background(
+        self,
+        interaction: discord.Interaction,
+        url: str
+    ):
+        if not url.startswith(("http://", "https://")):
+            await interaction.response.send_message(
+                "❌ Invalid URL.",
+                ephemeral=True
+            )
+            return
+
+        await UserModel.update_user(
+            interaction.user.id,
+            interaction.guild.id,
+            {"background": url}
+        )
+
+        await interaction.response.send_message(
+            "✅ Profile background updated!"
+        )
 
 
 async def setup(bot):
