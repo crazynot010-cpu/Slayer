@@ -1,44 +1,61 @@
-from database import shadows
+from database import shadows_collection
+import random
 
 
 class ShadowModel:
 
     @staticmethod
-    async def create(name: str, rarity: str, spawn_chance: float, image: str):
+    async def add_shadow(
+        name: str,
+        rarity: str,
+        spawn_chance: int,
+        hp: int,
+        defense: int,
+        attack: int,
+        image_url: str
+    ):
+        existing = await shadows_collection.find_one(
+            {"name": name.lower()}
+        )
+
+        if existing:
+            return None
+
         shadow = {
             "name": name.lower(),
-            "rarity": rarity,
+            "rarity": rarity.upper(),
             "spawn_chance": spawn_chance,
-            "image": image,
-            "stats": {
-                "def": 0,
-                "dmg": 0,
-                "stm": 0
-            }
+            "hp": hp,
+            "defense": defense,
+            "attack": attack,
+            "image_url": image_url
         }
-        await shadows.insert_one(shadow)
+
+        await shadows_collection.insert_one(shadow)
+        return shadow
 
     @staticmethod
-    async def delete(name: str):
-        await shadows.delete_one({"name": name.lower()})
+    async def remove_shadow(name: str):
+        result = await shadows_collection.delete_one(
+            {"name": name.lower()}
+        )
+        return result.deleted_count > 0
 
     @staticmethod
-    async def get(name: str):
-        return await shadows.find_one({"name": name.lower()})
-
-    @staticmethod
-    async def update_stats(name: str, def_stat: int, dmg: int, stm: int):
-        await shadows.update_one(
-            {"name": name.lower()},
-            {
-                "$set": {
-                    "stats.def": def_stat,
-                    "stats.dmg": dmg,
-                    "stats.stm": stm
-                }
-            }
+    async def get_shadow(name: str):
+        return await shadows_collection.find_one(
+            {"name": name.lower()}
         )
 
     @staticmethod
-    async def get_all():
-        return await shadows.find().to_list(length=None)
+    async def get_weighted_random_shadow():
+        shadows = await shadows_collection.find().to_list(length=None)
+
+        if not shadows:
+            return None
+
+        weighted_pool = []
+        for shadow in shadows:
+            weighted_pool.extend([shadow] * shadow["spawn_chance"])
+
+        return random.choice(weighted_pool)
