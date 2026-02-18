@@ -3,8 +3,8 @@ from models.guild_model import GuildModel
 from models.shadow_model import ShadowModel
 
 
-SPAWN_MIN = 30
-SPAWN_MAX = 60
+SPAWN_MIN = 12
+SPAWN_MAX = 24
 SPAWN_CHANCE = 0.43
 
 
