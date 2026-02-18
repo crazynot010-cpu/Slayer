@@ -1,30 +1,29 @@
-from database import guilds
+from database import guilds_collection
 
 
 class GuildModel:
 
     @staticmethod
-    async def get(guild_id: int):
-        guild = await guilds.find_one({"guild_id": guild_id})
+    async def get_guild(guild_id: int):
+        guild = await guilds_collection.find_one({"guild_id": guild_id})
 
         if not guild:
             guild = {
                 "guild_id": guild_id,
-                "message_count": 0,
-                "spawn_threshold": None,
-                "active_spawn": None,
                 "spawn_channel_id": None,
                 "ping_role_id": None,
-                "spawn_message_id": None,
-                "spawn_expires_at": None
+                "message_count": 0,
+                "spawn_threshold": 0,
+                "active_shadow": None
             }
-            await guilds.insert_one(guild)
+            await guilds_collection.insert_one(guild)
 
         return guild
 
     @staticmethod
-    async def update(guild_id: int, data: dict):
-        await guilds.update_one(
+    async def update_guild(guild_id: int, data: dict):
+        await guilds_collection.update_one(
             {"guild_id": guild_id},
-            {"$set": data}
+            {"$set": data},
+            upsert=True
         )
