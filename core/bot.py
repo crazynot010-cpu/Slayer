@@ -13,8 +13,8 @@ import asyncio
 import time
 
 
+GUILD_ID = 1425687957922386123
 XP_PER_MESSAGE = 25
-GUILD_ID = 1425687957922386123  # YOUR TEST SERVER
 
 
 class SoloLevelingBot(commands.Bot):
@@ -25,27 +25,28 @@ class SoloLevelingBot(commands.Bot):
         intents.members = True
 
         super().__init__(
-            command_prefix=None,
+            command_prefix="!",
             intents=intents
         )
 
+        self.spawn_cooldowns = {}
+
     # =====================================================
-    # GLOBAL + GUILD SYNC (WITH FULL RESET)
+    # SETUP HOOK — GUILD ONLY (NO GLOBAL)
     # =====================================================
     async def setup_hook(self):
 
         guild = discord.Object(id=GUILD_ID)
 
-        # 🔥 HARD RESET (prevents signature mismatch forever)
+        # FULL WIPE
         self.tree.clear_commands(guild=None)
         self.tree.clear_commands(guild=guild)
 
         await self.tree.sync()
         await self.tree.sync(guild=guild)
 
-        print("Old slash commands wiped.")
+        print("All commands wiped.")
 
-        # Register commands
         commands_to_add = [
             self.addshadow,
             self.removeshadow,
@@ -60,256 +61,188 @@ class SoloLevelingBot(commands.Bot):
         ]
 
         for cmd in commands_to_add:
-            self.tree.add_command(cmd)               # GLOBAL
-            self.tree.add_command(cmd, guild=guild) # INSTANT TEST GUILD
+            self.tree.add_command(cmd, guild=guild)
 
-        # Sync both
-        await self.tree.sync()  # Global (can take up to 1 hour)
         synced = await self.tree.sync(guild=guild)
 
-        print(f"Guild synced {len(synced)} commands instantly.")
-        print("Global sync requested.")
-
-    async def on_ready(self):
-        print(f"Logged in as {self.user} (ID: {self.user.id})")
+        print(f"Guild synced {len(synced)} commands.")
 
     # =====================================================
-    # MESSAGE EVENT (XP + SPAWN SYSTEM)
+    # READY EVENT
+    # =====================================================
+    async def on_ready(self):
+        print(f"Logged in as {self.user}")
+
+    # =====================================================
+    # XP SYSTEM
     # =====================================================
     async def on_message(self, message: discord.Message):
-        if message.author.bot or not message.guild:
+        if message.author.bot:
             return
 
-        guild_id = message.guild.id
-        user_id = message.author.id
-
-        await XPSystem.add_xp(user_id, guild_id, XP_PER_MESSAGE, message.author)
-
-        await SpawnSystem.increment_message(guild_id)
-        spawn = await SpawnSystem.try_spawn(guild_id)
-
-        if spawn:
-            guild_data = await GuildModel.get(guild_id)
-
-            channel_id = guild_data.get("spawn_channel_id")
-            ping_role_id = guild_data.get("ping_role_id")
-
-            channel = message.guild.get_channel(channel_id) if channel_id else message.channel
-
-            ping_text = ""
-            if ping_role_id:
-                role = message.guild.get_role(ping_role_id)
-                if role:
-                    ping_text = role.mention
-
-            embed = discord.Embed(
-                title="A Shadow Has Appeared...",
-                description="Use `/arise <name>` to claim it.",
-                color=discord.Color.dark_purple()
-            )
-            embed.set_image(url=spawn["image"])
-
-            sent_msg = await channel.send(content=ping_text, embed=embed)
-
-            expire_time = int(time.time()) + 120  # 2 minutes
-
-            await GuildModel.update(
-                guild_id,
-                {
-                    "spawn_message_id": sent_msg.id,
-                    "spawn_expires_at": expire_time
-                }
-            )
-
-            async def expire():
-                await asyncio.sleep(120)
-
-                guild_data = await GuildModel.get(guild_id)
-                if guild_data.get("active_spawn"):
-                    await SpawnSystem.clear_spawn(guild_id)
-                    try:
-                        await sent_msg.delete()
-                    except:
-                        pass
-
-            self.loop.create_task(expire())
-
-    # =====================================================
-    # ADMIN SHADOW COMMANDS
-    # =====================================================
-
-    @app_commands.command(name="addshadow", description="Add a new shadow (Admin only)")
-    async def addshadow(self, interaction: discord.Interaction,
-                        name: str,
-                        rarity: str,
-                        spawnchance: float,
-                        imageurl: str):
-
-        if not interaction.user.guild_permissions.administrator:
-            return await interaction.response.send_message("Admin only.", ephemeral=True)
-
-        await ShadowModel.create(name, rarity, spawnchance, imageurl)
-        await interaction.response.send_message(f"Shadow `{name}` created.")
-
-    @app_commands.command(name="removeshadow", description="Remove a shadow (Admin only)")
-    async def removeshadow(self, interaction: discord.Interaction, name: str):
-
-        if not interaction.user.guild_permissions.administrator:
-            return await interaction.response.send_message("Admin only.", ephemeral=True)
-
-        await ShadowModel.delete(name)
-        await interaction.response.send_message(f"Shadow `{name}` removed.")
-
-    @app_commands.command(name="statsshdw", description="Update shadow stats")
-    async def statsshdw(self, interaction: discord.Interaction,
-                        name: str,
-                        dmg: int,
-                        defense: int,
-                        stamina: int):
-
-        if not interaction.user.guild_permissions.administrator:
-            return await interaction.response.send_message("Admin only.", ephemeral=True)
-
-        await ShadowModel.update_stats(name, defense, dmg, stamina)
-        await interaction.response.send_message(f"Stats updated for `{name}`.")
-
-    # =====================================================
-    # SPAWN SETTINGS
-    # =====================================================
-
-    @app_commands.command(name="setspawnchannel", description="Set spawn channel")
-    async def setspawnchannel(self, interaction: discord.Interaction, channel: discord.TextChannel):
-
-        if not interaction.user.guild_permissions.administrator:
-            return await interaction.response.send_message("Admin only.", ephemeral=True)
-
-        await GuildModel.update(interaction.guild.id, {"spawn_channel_id": channel.id})
-        await interaction.response.send_message(f"Spawn channel set to {channel.mention}")
-
-    @app_commands.command(name="setspawnping", description="Set spawn ping role")
-    async def setspawnping(self, interaction: discord.Interaction, role: discord.Role):
-
-        if not interaction.user.guild_permissions.administrator:
-            return await interaction.response.send_message("Admin only.", ephemeral=True)
-
-        await GuildModel.update(interaction.guild.id, {"ping_role_id": role.id})
-        await interaction.response.send_message(f"Spawn ping role set to {role.mention}")
-
-    # =====================================================
-    # ARISE
-    # =====================================================
-
-    @app_commands.command(name="arise", description="Claim active shadow")
-    async def arise(self, interaction: discord.Interaction, name: str):
-
-        result = await AriseSystem.attempt(
-            interaction.user.id,
-            interaction.guild.id,
-            name
+        await XPSystem.add_xp(
+            user_id=message.author.id,
+            guild_id=message.guild.id,
+            amount=XP_PER_MESSAGE
         )
 
-        if not result["success"]:
-            reason = result["reason"]
+    # =====================================================
+    # ADMIN: ADD SHADOW
+    # =====================================================
+    @app_commands.command(name="addshadow", description="Add a new shadow")
+    async def addshadow(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+        rank: str,
+        hp: int,
+        attack: int
+    ):
+        await ShadowModel.create_shadow(name, rank, hp, attack)
+        await interaction.response.send_message(
+            f"Shadow **{name}** added."
+        )
 
-            if reason == "no_spawn":
-                return await interaction.response.send_message("No active shadow.", ephemeral=True)
+    # =====================================================
+    # ADMIN: REMOVE SHADOW
+    # =====================================================
+    @app_commands.command(name="removeshadow", description="Remove shadow")
+    async def removeshadow(self, interaction: discord.Interaction, name: str):
+        await ShadowModel.delete_shadow(name)
+        await interaction.response.send_message(
+            f"Shadow **{name}** removed."
+        )
 
-            if reason == "wrong_name":
-                return await interaction.response.send_message("Wrong name.", ephemeral=True)
+    # =====================================================
+    # SHADOW STATS
+    # =====================================================
+    @app_commands.command(name="statsshdw", description="View shadow stats")
+    async def statsshdw(self, interaction: discord.Interaction, name: str):
+        shadow = await ShadowModel.get_shadow(name)
 
-            if reason == "max_dupe":
-                return await interaction.response.send_message(
-                    "You already own 3 copies of this shadow.",
-                    ephemeral=True
-                )
+        if not shadow:
+            return await interaction.response.send_message("Shadow not found.")
 
         await interaction.response.send_message(
-            f"{interaction.user.mention} has arisen **{result['shadow']}**!"
+            f"**{shadow['name']}**\n"
+            f"Rank: {shadow['rank']}\n"
+            f"HP: {shadow['hp']}\n"
+            f"ATK: {shadow['attack']}"
         )
+
+    # =====================================================
+    # SET SPAWN CHANNEL
+    # =====================================================
+    @app_commands.command(name="setspawnchannel", description="Set spawn channel")
+    async def setspawnchannel(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel
+    ):
+        await GuildModel.set_spawn_channel(
+            interaction.guild.id,
+            channel.id
+        )
+        await interaction.response.send_message(
+            f"Spawn channel set to {channel.mention}"
+        )
+
+    # =====================================================
+    # SET SPAWN PING
+    # =====================================================
+    @app_commands.command(name="setspawnping", description="Set spawn ping role")
+    async def setspawnping(
+        self,
+        interaction: discord.Interaction,
+        role: discord.Role
+    ):
+        await GuildModel.set_spawn_ping(
+            interaction.guild.id,
+            role.id
+        )
+        await interaction.response.send_message(
+            f"Spawn ping set to {role.mention}"
+        )
+
+    # =====================================================
+    # ARISE (MAX DUPE = 3)
+    # =====================================================
+    @app_commands.command(name="arise", description="Capture a shadow")
+    async def arise(self, interaction: discord.Interaction):
+        result = await AriseSystem.capture_shadow(
+            interaction.user.id,
+            interaction.guild.id
+        )
+
+        await interaction.response.send_message(result)
 
     # =====================================================
     # PROFILE
     # =====================================================
-
     @app_commands.command(name="profile", description="View your profile")
     async def profile(self, interaction: discord.Interaction):
 
-        user = await UserModel.get(interaction.user.id, interaction.guild.id)
-
-        embed = discord.Embed(
-            title=f"{interaction.user.display_name}'s Profile",
-            color=discord.Color.dark_purple()
+        user = await UserModel.get_user(
+            interaction.user.id,
+            interaction.guild.id
         )
 
-        embed.add_field(name="Level", value=user["level"])
-        embed.add_field(name="XP", value=user["xp"])
-        embed.add_field(name="Shadows", value=len(user["shadows"]))
+        await interaction.response.send_message(
+            f"Level: {user['level']}\n"
+            f"XP: {user['xp']}"
+        )
 
-        if user.get("background"):
-            embed.set_image(url=user["background"])
-
-        embed.set_thumbnail(url=interaction.user.display_avatar.url)
-
-        await interaction.response.send_message(embed=embed)
-
+    # =====================================================
+    # SET BACKGROUND
+    # =====================================================
     @app_commands.command(name="setbackground", description="Set profile background")
     async def setbackground(self, interaction: discord.Interaction, url: str):
-
-        if not url.startswith("http"):
-            return await interaction.response.send_message("Invalid URL.", ephemeral=True)
-
-        await UserModel.update(interaction.user.id, interaction.guild.id, {"background": url})
+        await UserModel.set_background(
+            interaction.user.id,
+            interaction.guild.id,
+            url
+        )
         await interaction.response.send_message("Background updated.")
 
     # =====================================================
     # INVENTORY
     # =====================================================
-
     @app_commands.command(name="inventory", description="View your shadows")
     async def inventory(self, interaction: discord.Interaction):
 
-        user = await UserModel.get(interaction.user.id, interaction.guild.id)
-        shadows = user.get("shadows", [])
-
-        if not shadows:
-            return await interaction.response.send_message("You own no shadows.")
-
-        shadow_count = {}
-        for s in shadows:
-            shadow_count[s] = shadow_count.get(s, 0) + 1
-
-        desc = "\n".join([f"{name} x{count}" for name, count in shadow_count.items()])
-
-        embed = discord.Embed(
-            title=f"{interaction.user.display_name}'s Shadows",
-            description=desc,
-            color=discord.Color.dark_purple()
+        shadows = await UserModel.get_inventory(
+            interaction.user.id,
+            interaction.guild.id
         )
 
-        await interaction.response.send_message(embed=embed)
+        if not shadows:
+            return await interaction.response.send_message("Inventory empty.")
+
+        formatted = "\n".join(
+            [f"{name} x{count}" for name, count in shadows.items()]
+        )
+
+        await interaction.response.send_message(
+            f"**Your Shadows:**\n{formatted}"
+        )
 
     # =====================================================
     # LEADERBOARD
     # =====================================================
-
-    @app_commands.command(name="leaderboard", description="Top hunters")
+    @app_commands.command(name="leaderboard", description="XP leaderboard")
     async def leaderboard(self, interaction: discord.Interaction):
 
-        top_users = await UserModel.leaderboard(interaction.guild.id)
+        top = await UserModel.get_leaderboard(interaction.guild.id)
 
-        if not top_users:
-            return await interaction.response.send_message("No data.")
+        if not top:
+            return await interaction.response.send_message("No data yet.")
 
-        desc = ""
-        for i, user in enumerate(top_users, start=1):
-            member = interaction.guild.get_member(user["user_id"])
-            name = member.display_name if member else "Unknown"
-            desc += f"**{i}.** {name} — Level {user['level']}\n"
+        lines = []
+        for i, user in enumerate(top, start=1):
+            lines.append(
+                f"{i}. <@{user['user_id']}> — Level {user['level']}"
+            )
 
-        embed = discord.Embed(
-            title="Hunter Leaderboard",
-            description=desc,
-            color=discord.Color.gold()
+        await interaction.response.send_message(
+            "**Leaderboard**\n" + "\n".join(lines)
         )
-
-        await interaction.response.send_message(embed=embed)
