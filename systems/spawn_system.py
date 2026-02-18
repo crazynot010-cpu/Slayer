@@ -1,92 +1,72 @@
 import random
-import asyncio
 import discord
 
 from models.guild_model import GuildModel
-
-active_spawns = {}
-
-
-async def handle_message_spawn(bot, message: discord.Message):
-
-    guild_data = await GuildModel.get_guild(message.guild.id)
-
-    # If no spawn channel set, don't spawn
-    if not guild_data["spawn_channel_id"]:
-        return
-
-    # Increment message counter
-    new_count = guild_data["message_count"] + 1
-
-    # If no threshold yet, set random 12–30
-    if not guild_data.get("spawn_threshold"):
-        threshold = random.randint(12, 30)
-    else:
-        threshold = guild_data["spawn_threshold"]
-
-    # Save updated count
-    await GuildModel.update_guild(
-        message.guild.id,
-        {"message_count": new_count}
-    )
-
-    if new_count < threshold:
-        return
-
-    # RESET counter + set new threshold
-    new_threshold = random.randint(12, 30)
-
-    await GuildModel.update_guild(
-        message.guild.id,
-        {
-            "message_count": 0,
-            "spawn_threshold": new_threshold
-        }
-    )
-
-    await spawn_shadow(bot, message.guild)
+from models.shadow_model import ShadowModel
 
 
-async def spawn_shadow(bot, guild: discord.Guild):
+class SpawnSystem:
 
-    guild_data = await GuildModel.get_guild(guild.id)
+    def __init__(self):
+        self.active_spawns = {}
 
-    channel = guild.get_channel(guild_data["spawn_channel_id"])
-    if not channel:
-        return
+    async def process_message(self, message: discord.Message):
+        if message.author.bot:
+            return
 
-    shadow_name = random.choice(["Goblin", "Orc", "Shadow Knight"])
-    shadow_rank = random.choice(["E", "D", "C"])
-    xp_reward = random.randint(50, 120)
+        guild = await GuildModel.get_guild(message.guild.id)
 
-    embed = discord.Embed(
-        title="⚔️ A Shadow Has Appeared!",
-        description=f"**{shadow_name}** (Rank {shadow_rank})\n\nType `/arise` to claim!",
-        color=0x2f3136
-    )
+        if not guild["spawn_channel_id"]:
+            return
 
-    msg = await channel.send(
-        content=f"<@&{guild_data['ping_role_id']}>" if guild_data["ping_role_id"] else None,
-        embed=embed
-    )
+        if message.channel.id != guild["spawn_channel_id"]:
+            return
 
-    active_spawns[guild.id] = {
-        "name": shadow_name,
-        "rank": shadow_rank,
-        "xp": xp_reward,
-        "message_id": msg.id
-    }
+        count = guild["message_count"] + 1
 
-    # Expire after 2 minutes
-    await asyncio.sleep(120)
+        if guild["spawn_threshold"] == 0:
+            threshold = random.randint(12, 30)
+        else:
+            threshold = guild["spawn_threshold"]
 
-    if guild.id in active_spawns:
-        del active_spawns[guild.id]
+        if count >= threshold:
+            await self.spawn_shadow(message.channel, message.guild)
+            count = 0
+            threshold = random.randint(12, 30)
 
-        expire_embed = discord.Embed(
-            title="❌ Shadow Escaped!",
-            description="You were too slow...",
-            color=0xff0000
+        await GuildModel.update_guild(
+            message.guild.id,
+            {
+                "message_count": count,
+                "spawn_threshold": threshold
+            }
         )
 
-        await channel.send(embed=expire_embed)
+    async def spawn_shadow(self, channel, guild):
+        shadow = await ShadowModel.get_weighted_random_shadow()
+
+        if not shadow:
+            return
+
+        self.active_spawns[guild.id] = shadow
+
+        embed = discord.Embed(
+            title="⚔️ A Shadow Has Appeared!",
+            description="Use `/arise <name>` to claim it.",
+            color=0x2f3136
+        )
+
+        embed.set_image(url=shadow["image_url"])
+
+        guild_data = await GuildModel.get_guild(guild.id)
+
+        ping = ""
+        if guild_data["ping_role_id"]:
+            role = guild.get_role(guild_data["ping_role_id"])
+            if role:
+                ping = role.mention
+
+        await channel.send(content=ping, embed=embed)
+
+
+spawn_system = SpawnSystem()
