@@ -1,262 +1,194 @@
+import os
+import random
+import asyncio
 import discord
 from discord.ext import commands
 from discord import app_commands
+from motor.motor_asyncio import AsyncIOMotorClient
 
-from models.shadow_model import ShadowModel
-from models.user_model import UserModel
-from models.guild_model import GuildModel
-from systems.spawn_system import SpawnSystem
-from systems.arise_system import AriseSystem
-from systems.xp_system import XPSystem
+TOKEN = os.getenv("TOKEN")
+MONGO_URI = os.getenv("MONGO_URI")
 
-XP_PER_MESSAGE = 25
+if not TOKEN:
+    raise RuntimeError("TOKEN missing.")
+if not MONGO_URI:
+    raise RuntimeError("MONGO_URI missing.")
+
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
 
 
-class SoloLevelingBot(commands.Bot):
+class SlayerBot(commands.Bot):
 
     def __init__(self):
-        intents = discord.Intents.default()
-        intents.message_content = True
-        intents.members = True
-
         super().__init__(
             command_prefix="!",
             intents=intents
         )
+        self.mongo = AsyncIOMotorClient(MONGO_URI)
+        self.db = self.mongo["solo_leveling"]
 
-        self.spawn_cooldowns = {}
-
-    # =====================================================
-    # GLOBAL SYNC ONLY
-    # =====================================================
     async def setup_hook(self):
+
+        # --- REGISTER SLASH COMMANDS ---
+        self.tree.add_command(self.profile)
+        self.tree.add_command(self.inventory)
+        self.tree.add_command(self.leaderboard)
+        self.tree.add_command(self.arise)
+        self.tree.add_command(self.setspawnchannel)
+
         synced = await self.tree.sync()
         print(f"Global synced {len(synced)} commands.")
 
-    # =====================================================
-    # READY
-    # =====================================================
     async def on_ready(self):
-        print(f"Logged in as {self.user} (ID: {self.user.id})")
+        print(f"Logged in as {self.user}")
 
-    # =====================================================
-    # GLOBAL SLASH ERROR HANDLER
-    # =====================================================
     async def on_app_command_error(
         self,
         interaction: discord.Interaction,
         error: app_commands.AppCommandError
     ):
-        print(f"Slash Error: {error}")
+        print("Slash Error:", error)
 
         if interaction.response.is_done():
             await interaction.followup.send(
-                "An internal error occurred.",
+                "An error occurred.",
                 ephemeral=True
             )
         else:
             await interaction.response.send_message(
-                "An internal error occurred.",
+                "An error occurred.",
                 ephemeral=True
             )
 
-    # =====================================================
-    # XP SYSTEM
-    # =====================================================
-    async def on_message(self, message: discord.Message):
-        if message.author.bot:
-            return
+    async def ensure_user(self, user_id: int):
+        user = await self.db.users.find_one({"_id": user_id})
+        if not user:
+            user = {
+                "_id": user_id,
+                "level": 1,
+                "xp": 0,
+                "shadows": []
+            }
+            await self.db.users.insert_one(user)
+        return user
 
-        await XPSystem.add_xp(
-            user_id=message.author.id,
-            guild_id=message.guild.id,
-            amount=XP_PER_MESSAGE
-        )
+    # ============================
+    # PREFIX COMMAND
+    # ============================
 
-        await self.process_commands(message)
+    @commands.command()
+    async def ping(self, ctx):
+        await ctx.send("Pong!")
 
-    # =====================================================
-    # ADD SHADOW
-    # =====================================================
-    @app_commands.command(name="addshadow", description="Add a new shadow")
-    async def addshadow(
-        self,
-        interaction: discord.Interaction,
-        name: str,
-        rank: str,
-        hp: int,
-        attack: int
-    ):
+    # ============================
+    # SLASH COMMANDS
+    # ============================
+
+    @app_commands.command(name="profile", description="View your hunter profile")
+    async def profile(self, interaction: discord.Interaction):
+
         await interaction.response.defer()
 
-        await ShadowModel.create_shadow(name, rank, hp, attack)
+        user = await self.ensure_user(interaction.user.id)
 
         await interaction.followup.send(
-            f"Shadow **{name}** added."
+            f"**Level:** {user['level']}\n"
+            f"**XP:** {user['xp']}\n"
+            f"**Shadows:** {len(user['shadows'])}"
         )
 
-    # =====================================================
-    # REMOVE SHADOW
-    # =====================================================
-    @app_commands.command(name="removeshadow", description="Remove shadow")
-    async def removeshadow(self, interaction: discord.Interaction, name: str):
+    @app_commands.command(name="inventory", description="View your shadows")
+    async def inventory(self, interaction: discord.Interaction):
+
         await interaction.response.defer()
 
-        await ShadowModel.delete_shadow(name)
+        user = await self.ensure_user(interaction.user.id)
 
-        await interaction.followup.send(
-            f"Shadow **{name}** removed."
-        )
+        if not user["shadows"]:
+            return await interaction.followup.send("You have no shadows.")
 
-    # =====================================================
-    # SHADOW STATS
-    # =====================================================
-    @app_commands.command(name="statsshdw", description="View shadow stats")
-    async def statsshdw(self, interaction: discord.Interaction, name: str):
+        shadow_list = "\n".join(user["shadows"])
+        await interaction.followup.send(f"**Your Shadows:**\n{shadow_list}")
+
+    @app_commands.command(name="leaderboard", description="Top hunters")
+    async def leaderboard(self, interaction: discord.Interaction):
+
         await interaction.response.defer()
 
-        shadow = await ShadowModel.get_shadow(name)
+        users = self.db.users.find().sort("level", -1).limit(10)
 
-        if not shadow:
-            return await interaction.followup.send("Shadow not found.")
+        text = ""
+        rank = 1
 
-        await interaction.followup.send(
-            f"**{shadow['name']}**\n"
-            f"Rank: {shadow['rank']}\n"
-            f"HP: {shadow['hp']}\n"
-            f"ATK: {shadow['attack']}"
+        async for user in users:
+            text += f"{rank}. <@{user['_id']}> - Level {user['level']}\n"
+            rank += 1
+
+        if not text:
+            text = "No hunters yet."
+
+        await interaction.followup.send(text)
+
+    @app_commands.command(name="arise", description="Arise a random shadow")
+    async def arise(self, interaction: discord.Interaction):
+
+        await interaction.response.defer()
+
+        user = await self.ensure_user(interaction.user.id)
+
+        shadows = [
+            "Iron",
+            "Tank",
+            "Beru",
+            "Igris",
+            "Tusk"
+        ]
+
+        shadow = random.choice(shadows)
+
+        await self.db.users.update_one(
+            {"_id": interaction.user.id},
+            {
+                "$push": {"shadows": shadow},
+                "$inc": {"xp": 25}
+            }
         )
 
-    # =====================================================
-    # SET SPAWN CHANNEL
-    # =====================================================
+        await interaction.followup.send(
+            f"🗡️ You have arisen **{shadow}**!\n+25 XP"
+        )
+
     @app_commands.command(name="setspawnchannel", description="Set spawn channel")
+    @app_commands.checks.has_permissions(administrator=True)
     async def setspawnchannel(
         self,
         interaction: discord.Interaction,
         channel: discord.TextChannel
     ):
-        await interaction.response.defer()
 
-        await GuildModel.set_spawn_channel(
-            interaction.guild.id,
-            channel.id
+        await interaction.response.defer(ephemeral=True)
+
+        await self.db.guilds.update_one(
+            {"_id": interaction.guild.id},
+            {"$set": {"spawn_channel": channel.id}},
+            upsert=True
         )
 
         await interaction.followup.send(
-            f"Spawn channel set to {channel.mention}"
+            f"Spawn channel set to {channel.mention}",
+            ephemeral=True
         )
 
-    # =====================================================
-    # SET SPAWN PING
-    # =====================================================
-    @app_commands.command(name="setspawnping", description="Set spawn ping role")
-    async def setspawnping(
-        self,
-        interaction: discord.Interaction,
-        role: discord.Role
-    ):
-        await interaction.response.defer()
 
-        await GuildModel.set_spawn_ping(
-            interaction.guild.id,
-            role.id
-        )
+bot = SlayerBot()
 
-        await interaction.followup.send(
-            f"Spawn ping set to {role.mention}"
-        )
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+    await bot.process_commands(message)
 
-    # =====================================================
-    # ARISE (MAX DUPE = 3)
-    # =====================================================
-    @app_commands.command(name="arise", description="Capture a shadow")
-    async def arise(self, interaction: discord.Interaction):
-        await interaction.response.defer()
 
-        result = await AriseSystem.capture_shadow(
-            interaction.user.id,
-            interaction.guild.id
-        )
-
-        await interaction.followup.send(result)
-
-    # =====================================================
-    # PROFILE
-    # =====================================================
-    @app_commands.command(name="profile", description="View your profile")
-    async def profile(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-
-        user = await UserModel.get_user(
-            interaction.user.id,
-            interaction.guild.id
-        )
-
-        if not user:
-            return await interaction.followup.send("Profile not found.")
-
-        await interaction.followup.send(
-            f"Level: {user['level']}\n"
-            f"XP: {user['xp']}"
-        )
-
-    # =====================================================
-    # SET BACKGROUND
-    # =====================================================
-    @app_commands.command(name="setbackground", description="Set profile background")
-    async def setbackground(self, interaction: discord.Interaction, url: str):
-        await interaction.response.defer()
-
-        await UserModel.set_background(
-            interaction.user.id,
-            interaction.guild.id,
-            url
-        )
-
-        await interaction.followup.send("Background updated.")
-
-    # =====================================================
-    # INVENTORY
-    # =====================================================
-    @app_commands.command(name="inventory", description="View your shadows")
-    async def inventory(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-
-        shadows = await UserModel.get_inventory(
-            interaction.user.id,
-            interaction.guild.id
-        )
-
-        if not shadows:
-            return await interaction.followup.send("Inventory empty.")
-
-        formatted = "\n".join(
-            [f"{name} x{count}" for name, count in shadows.items()]
-        )
-
-        await interaction.followup.send(
-            f"**Your Shadows:**\n{formatted}"
-        )
-
-    # =====================================================
-    # LEADERBOARD
-    # =====================================================
-    @app_commands.command(name="leaderboard", description="XP leaderboard")
-    async def leaderboard(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-
-        top = await UserModel.get_leaderboard(interaction.guild.id)
-
-        if not top:
-            return await interaction.followup.send("No data yet.")
-
-        lines = []
-        for i, user in enumerate(top, start=1):
-            lines.append(
-                f"{i}. <@{user['user_id']}> — Level {user['level']}"
-            )
-
-        await interaction.followup.send(
-            "**Leaderboard**\n" + "\n".join(lines)
-        )
+bot.run(TOKEN)
