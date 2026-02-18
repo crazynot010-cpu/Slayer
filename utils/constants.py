@@ -1,9 +1,8 @@
-BOT_NAME = "Solo Leveling Bot"
-
-DEFAULT_COLOR = 0x2F3136
-
-SUCCESS_COLOR = 0x57F287
-ERROR_COLOR = 0xED4245
-WARNING_COLOR = 0xFEE75C
-
-MAX_SHADOWS = 20
+RANK_LEVELS = {
+    75: "S Rank",
+    50: "A Rank",
+    35: "B Rank",
+    20: "C Rank",
+    10: "D Rank",
+    5: "E Rank"
+}
