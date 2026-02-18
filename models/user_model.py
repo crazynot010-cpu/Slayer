@@ -16,7 +16,8 @@ class UserModel:
                 "guild_id": guild_id,
                 "xp": 0,
                 "level": 1,
-                "shadows": []
+                "shadows": [],
+                "background": None
             }
             await users_collection.insert_one(user)
 
