@@ -1,32 +1,25 @@
-from database import guilds_collection
+from database import guilds
 
 
 class GuildModel:
 
     @staticmethod
-    async def get_guild(guild_id: int):
-        guild = await guilds_collection.find_one({"_id": guild_id})
+    async def get(guild_id: int):
+        guild = await guilds.find_one({"guild_id": guild_id})
 
         if not guild:
             guild = {
-                "_id": guild_id,
-                "spawn_channel": None,
-                "xp_multiplier": 1.0
+                "guild_id": guild_id,
+                "message_count": 0,
+                "rank_roles": {}
             }
-            await guilds_collection.insert_one(guild)
+            await guilds.insert_one(guild)
 
         return guild
 
     @staticmethod
-    async def set_spawn_channel(guild_id: int, channel_id: int):
-        await guilds_collection.update_one(
-            {"_id": guild_id},
-            {"$set": {"spawn_channel": channel_id}}
-        )
-
-    @staticmethod
-    async def set_xp_multiplier(guild_id: int, multiplier: float):
-        await guilds_collection.update_one(
-            {"_id": guild_id},
-            {"$set": {"xp_multiplier": multiplier}}
+    async def update(guild_id: int, data: dict):
+        await guilds.update_one(
+            {"guild_id": guild_id},
+            {"$set": data}
         )
