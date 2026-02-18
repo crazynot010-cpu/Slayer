@@ -1,58 +1,61 @@
 import discord
-from discord.ext import commands
 from discord import app_commands
+from discord.ext import commands
 
-from models.user_model import UserModel
-from utils.embeds import base_embed
+from database import users_collection
 
 
 class Leaderboard(commands.Cog):
+
     def __init__(self, bot):
         self.bot = bot
 
-    # PREFIX
-    @commands.command(name="leaderboard", aliases=["lb"])
-    async def leaderboard_prefix(self, ctx, category: str = "level"):
-        await self.send_leaderboard(ctx, category)
+    @app_commands.command(
+        name="leaderboard",
+        description="View the top hunters in this server"
+    )
+    async def leaderboard(self, interaction: discord.Interaction):
 
-    # SLASH
-    @app_commands.command(name="leaderboard", description="View global rankings")
-    @app_commands.describe(category="Choose ranking category: level or gold")
-    async def leaderboard_slash(self, interaction: discord.Interaction, category: str = "level"):
-        await interaction.response.defer()
-        await self.send_leaderboard(interaction, category, slash=True)
-
-    async def send_leaderboard(self, ctx_or_interaction, category: str, slash=False):
-        category = category.lower()
-
-        if category not in ["level", "gold"]:
-            embed = base_embed(title="Invalid Category")
-            embed.description = "Available categories: `level`, `gold`"
-            if slash:
-                await ctx_or_interaction.followup.send(embed=embed)
-            else:
-                await ctx_or_interaction.send(embed=embed)
-            return
-
-        # Get sorted users from DB
-        users = await UserModel.get_top_users(category)
-
-        embed = base_embed(title=f"🏆 Global {category.capitalize()} Leaderboard")
+        users = await users_collection.find(
+            {"guild_id": interaction.guild.id}
+        ).to_list(length=None)
 
         if not users:
-            embed.description = "No data available yet."
-        else:
-            for index, user in enumerate(users[:10], start=1):
-                embed.add_field(
-                    name=f"#{index}",
-                    value=f"<@{user['user_id']}> — {user.get(category, 0)}",
-                    inline=False
-                )
+            await interaction.response.send_message(
+                "No data yet."
+            )
+            return
 
-        if slash:
-            await ctx_or_interaction.followup.send(embed=embed)
-        else:
-            await ctx_or_interaction.send(embed=embed)
+        # Sort by level first, then XP
+        users_sorted = sorted(
+            users,
+            key=lambda u: (u["level"], u["xp"]),
+            reverse=True
+        )
+
+        top_users = users_sorted[:10]
+
+        embed = discord.Embed(
+            title="🏆 Hunter Leaderboard",
+            color=0x2f3136
+        )
+
+        description = ""
+
+        for index, user in enumerate(top_users, start=1):
+            member = interaction.guild.get_member(user["user_id"])
+
+            name = member.display_name if member else "Unknown"
+
+            description += (
+                f"**{index}. {name}** "
+                f"- Level {user['level']} "
+                f"({user['xp']} XP)\n"
+            )
+
+        embed.description = description
+
+        await interaction.response.send_message(embed=embed)
 
 
 async def setup(bot):
