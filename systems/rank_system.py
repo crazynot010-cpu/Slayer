@@ -1,4 +1,4 @@
-import discord 
+import discord
 from utils.constants import RANK_LEVELS
 
 
@@ -6,7 +6,6 @@ class RankSystem:
 
     @staticmethod
     async def update_roles(member, level: int):
-        guild = member.guild
 
         eligible_rank = None
 
@@ -18,16 +17,13 @@ class RankSystem:
         if not eligible_rank:
             return
 
-        # Find role in guild
-        role = discord.utils.get(guild.roles, name=eligible_rank)
+        role = discord.utils.get(member.guild.roles, name=eligible_rank)
         if not role:
-            return  # Role must exist manually in server
+            return
 
-        # Remove lower rank roles
-        for r in guild.roles:
-            if r.name in RANK_LEVELS.values() and r in member.roles:
+        for r in member.roles:
+            if r.name in RANK_LEVELS.values():
                 await member.remove_roles(r)
 
-        # Add new rank role
         if role not in member.roles:
             await member.add_roles(role)
