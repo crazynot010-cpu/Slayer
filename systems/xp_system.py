@@ -1,40 +1,34 @@
 from models.user_model import UserModel
+from systems.rank_system import RankSystem
 
 
 class XPSystem:
 
     @staticmethod
-    def xp_required(level: int) -> int:
-        # Simple scalable formula
+    def xp_required(level: int):
         return 100 * level
 
     @staticmethod
-    async def add_xp(user_id: int, guild_id: int, amount: int):
+    async def add_xp(user_id: int, guild_id: int, amount: int, member=None):
+
         user = await UserModel.get(user_id, guild_id)
 
-        current_xp = user["xp"]
-        current_level = user["level"]
+        xp = user["xp"] + amount
+        level = user["level"]
 
-        new_xp = current_xp + amount
         leveled_up = False
 
-        while new_xp >= XPSystem.xp_required(current_level):
-            new_xp -= XPSystem.xp_required(current_level)
-            current_level += 1
+        while xp >= XPSystem.xp_required(level):
+            xp -= XPSystem.xp_required(level)
+            level += 1
             leveled_up = True
 
-        await UserModel.update(
-            user_id,
-            guild_id,
-            {
-                "xp": new_xp,
-                "level": current_level
-            }
-        )
+        await UserModel.update(user_id, guild_id, {
+            "xp": xp,
+            "level": level
+        })
 
-        return {
-            "leveled_up": leveled_up,
-            "level": current_level,
-            "xp": new_xp,
-            "xp_needed": XPSystem.xp_required(current_level)
-        }
+        if leveled_up and member:
+            await RankSystem.update_roles(member, level)
+
+        return leveled_up
