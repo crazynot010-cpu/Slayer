@@ -3,19 +3,23 @@ import time
 
 class CooldownSystem:
 
-    _cooldowns = {}
+    def __init__(self):
+        self.cooldowns = {}
 
-    @staticmethod
-    def check(user_id: int, key: str, seconds: int):
+    def is_on_cooldown(self, user_id: int, seconds: int):
         now = time.time()
-        user_data = CooldownSystem._cooldowns.get(user_id, {})
 
-        last_used = user_data.get(key)
+        if user_id not in self.cooldowns:
+            self.cooldowns[user_id] = now
+            return False
 
-        if last_used and now - last_used < seconds:
-            remaining = seconds - (now - last_used)
-            return False, round(remaining, 1)
+        last_used = self.cooldowns[user_id]
 
-        user_data[key] = now
-        CooldownSystem._cooldowns[user_id] = user_data
-        return True, 0
+        if now - last_used < seconds:
+            return True
+
+        self.cooldowns[user_id] = now
+        return False
+
+
+cooldown_system = CooldownSystem()
