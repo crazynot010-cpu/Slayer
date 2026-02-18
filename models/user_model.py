@@ -1,58 +1,39 @@
-from database import users_collection
-from datetime import datetime
+from database import users
 
 
 class UserModel:
 
     @staticmethod
-    async def get_user(user_id: int):
-        user = await users_collection.find_one({"_id": user_id})
+    async def get(user_id: int, guild_id: int):
+        user = await users.find_one({
+            "user_id": user_id,
+            "guild_id": guild_id
+        })
 
         if not user:
             user = {
-                "_id": user_id,
+                "user_id": user_id,
+                "guild_id": guild_id,
                 "xp": 0,
                 "level": 1,
-                "rank": "E",
-                "gold": 0,
+                "background": None,
                 "shadows": [],
-                "created_at": datetime.utcnow()
+                "created_at": None
             }
-            await users_collection.insert_one(user)
+            await users.insert_one(user)
 
         return user
 
     @staticmethod
-    async def add_xp(user_id: int, amount: int):
-        await users_collection.update_one(
-            {"_id": user_id},
-            {"$inc": {"xp": amount}}
+    async def update(user_id: int, guild_id: int, data: dict):
+        await users.update_one(
+            {"user_id": user_id, "guild_id": guild_id},
+            {"$set": data}
         )
 
     @staticmethod
-    async def update_level(user_id: int, level: int):
-        await users_collection.update_one(
-            {"_id": user_id},
-            {"$set": {"level": level}}
+    async def add_shadow(user_id: int, guild_id: int, shadow_name: str):
+        await users.update_one(
+            {"user_id": user_id, "guild_id": guild_id},
+            {"$push": {"shadows": shadow_name}}
         )
-
-    @staticmethod
-    async def update_rank(user_id: int, rank: str):
-        await users_collection.update_one(
-            {"_id": user_id},
-            {"$set": {"rank": rank}}
-        )
-
-    @staticmethod
-    async def add_gold(user_id: int, amount: int):
-        await users_collection.update_one(
-            {"_id": user_id},
-            {"$inc": {"gold": amount}}
-        )
-
-    @staticmethod
-    async def add_shadow(user_id: int, shadow_id: str):
-        await users_collection.update_one(
-            {"_id": user_id},
-            {"$push": {"shadows": shadow_id}}
-      )
