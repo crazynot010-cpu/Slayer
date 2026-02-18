@@ -18,7 +18,7 @@ class UserModel:
                 "level": 1,
                 "shadows": [],
                 "background_global": None,
-                "background_guilds{}
+                "background_guilds": {}
             }
             await users_collection.insert_one(user)
 
