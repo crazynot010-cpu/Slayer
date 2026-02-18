@@ -11,8 +11,8 @@ class AriseSystem:
 
     @staticmethod
     async def attempt(user_id: int, guild_id: int, guess_name: str):
-        guild = await GuildModel.get(guild_id)
 
+        guild = await GuildModel.get(guild_id)
         active = guild.get("active_spawn")
 
         if not active:
@@ -21,17 +21,16 @@ class AriseSystem:
         if active.lower() != guess_name.lower():
             return {"success": False, "reason": "wrong_name"}
 
-        # Add shadow to user
-        await UserModel.add_shadow(user_id, guild_id, active)
+        added = await UserModel.add_shadow(user_id, guild_id, active)
 
-        # Give XP reward
-        xp_result = await XPSystem.add_xp(user_id, guild_id, ARISE_XP_REWARD)
+        if not added:
+            return {"success": False, "reason": "max_dupe"}
 
-        # Clear spawn
+        await XPSystem.add_xp(user_id, guild_id, ARISE_XP_REWARD)
+
         await SpawnSystem.clear_spawn(guild_id)
 
         return {
             "success": True,
-            "shadow": active,
-            "xp_result": xp_result
+            "shadow": active
         }
