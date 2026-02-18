@@ -1,7 +1,13 @@
+import asyncio
 from core.bot import SoloBot
 from settings import TOKEN
 
-bot = SoloBot()
+
+async def main():
+    bot = SoloBot()
+    async with bot:
+        await bot.start(TOKEN)
+
 
 if __name__ == "__main__":
-    bot.run(TOKEN)
+    asyncio.run(main())
