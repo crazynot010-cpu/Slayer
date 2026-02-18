@@ -1,29 +1,11 @@
-import discord
-from utils.constants import RANK_LEVELS
-
-
 class RankSystem:
 
+    RANK_ORDER = ["E", "D", "C", "B", "A", "S", "SS", "SSS"]
+
     @staticmethod
-    async def update_roles(member, level: int):
+    def is_valid_rank(rank: str):
+        return rank.upper() in RankSystem.RANK_ORDER
 
-        eligible_rank = None
-
-        for lvl, role_name in sorted(RANK_LEVELS.items(), reverse=True):
-            if level >= lvl:
-                eligible_rank = role_name
-                break
-
-        if not eligible_rank:
-            return
-
-        role = discord.utils.get(member.guild.roles, name=eligible_rank)
-        if not role:
-            return
-
-        for r in member.roles:
-            if r.name in RANK_LEVELS.values():
-                await member.remove_roles(r)
-
-        if role not in member.roles:
-            await member.add_roles(role)
+    @staticmethod
+    def rank_index(rank: str):
+        return RankSystem.RANK_ORDER.index(rank.upper())
