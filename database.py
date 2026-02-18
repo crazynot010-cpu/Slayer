@@ -1,11 +1,10 @@
-from motor.motor_asyncio import AsyncIOMotorClient
-from config import MONGO_URI
+import motor.motor_asyncio
+from settings import MONGO_URI
 
-client = AsyncIOMotorClient(MONGO_URI)
+client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
 
-db = client["shadowbot"]
+db = client["solo_leveling"]
 
-users = db["users"]
 guilds = db["guilds"]
+users = db["users"]
 shadows = db["shadows"]
-global_stats = db["global_stats"]
