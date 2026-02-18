@@ -15,6 +15,9 @@ import time
 
 XP_PER_MESSAGE = 25
 
+# 🔥 PUT YOUR SERVER ID HERE
+GUILD_ID = 123456789012345678
+
 
 class SoloLevelingBot(commands.Bot):
 
@@ -28,13 +31,27 @@ class SoloLevelingBot(commands.Bot):
             intents=intents
         )
 
+    # ==========================================
+    # FIXED SLASH SYNC (INSTANT)
+    # ==========================================
     async def setup_hook(self):
-        await self.tree.sync()
-        print("Slash commands synced.")
+
+        guild = discord.Object(id=GUILD_ID)
+
+        # Clear previous guild commands
+        self.tree.clear_commands(guild=guild)
+
+        # Sync instantly to your server
+        await self.tree.sync(guild=guild)
+
+        print("Instant guild slash sync complete.")
 
     async def on_ready(self):
         print(f"Logged in as {self.user} (ID: {self.user.id})")
 
+    # ==========================================
+    # MESSAGE EVENT (XP + SPAWN)
+    # ==========================================
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild:
             return
@@ -96,9 +113,9 @@ class SoloLevelingBot(commands.Bot):
 
             self.loop.create_task(expire())
 
-    # ===============================
+    # ==========================================
     # ADMIN SHADOW COMMANDS
-    # ===============================
+    # ==========================================
 
     @app_commands.command(name="addshadow", description="Add a new shadow (Admin only)")
     async def addshadow(self, interaction: discord.Interaction,
@@ -135,9 +152,9 @@ class SoloLevelingBot(commands.Bot):
         await ShadowModel.update_stats(name, defense, dmg, stamina)
         await interaction.response.send_message(f"Stats updated for `{name}`.")
 
-    # ===============================
+    # ==========================================
     # SPAWN SETTINGS
-    # ===============================
+    # ==========================================
 
     @app_commands.command(name="setspawnchannel", description="Set spawn channel")
     async def setspawnchannel(self, interaction: discord.Interaction, channel: discord.TextChannel):
@@ -157,9 +174,9 @@ class SoloLevelingBot(commands.Bot):
         await GuildModel.update(interaction.guild.id, {"ping_role_id": role.id})
         await interaction.response.send_message(f"Spawn ping role set to {role.mention}")
 
-    # ===============================
+    # ==========================================
     # ARISE
-    # ===============================
+    # ==========================================
 
     @app_commands.command(name="arise", description="Claim active shadow")
     async def arise(self, interaction: discord.Interaction, name: str):
@@ -189,9 +206,9 @@ class SoloLevelingBot(commands.Bot):
             f"{interaction.user.mention} has arisen **{result['shadow']}**!"
         )
 
-    # ===============================
+    # ==========================================
     # PROFILE
-    # ===============================
+    # ==========================================
 
     @app_commands.command(name="profile", description="View your profile")
     async def profile(self, interaction: discord.Interaction):
@@ -223,9 +240,9 @@ class SoloLevelingBot(commands.Bot):
         await UserModel.update(interaction.user.id, interaction.guild.id, {"background": url})
         await interaction.response.send_message("Background updated.")
 
-    # ===============================
+    # ==========================================
     # INVENTORY
-    # ===============================
+    # ==========================================
 
     @app_commands.command(name="inventory", description="View your shadows")
     async def inventory(self, interaction: discord.Interaction):
@@ -250,9 +267,9 @@ class SoloLevelingBot(commands.Bot):
 
         await interaction.response.send_message(embed=embed)
 
-    # ===============================
+    # ==========================================
     # LEADERBOARD
-    # ===============================
+    # ==========================================
 
     @app_commands.command(name="leaderboard", description="Top hunters")
     async def leaderboard(self, interaction: discord.Interaction):
