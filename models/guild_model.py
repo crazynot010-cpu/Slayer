@@ -11,7 +11,12 @@ class GuildModel:
             guild = {
                 "guild_id": guild_id,
                 "message_count": 0,
-                "rank_roles": {}
+                "spawn_threshold": None,
+                "active_spawn": None,
+                "spawn_channel_id": None,
+                "ping_role_id": None,
+                "spawn_message_id": None,
+                "spawn_expires_at": None
             }
             await guilds.insert_one(guild)
 
