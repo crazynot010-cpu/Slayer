@@ -1,7 +1,13 @@
-from core.bot import SoloLevelingBot
+import asyncio
 from settings import TOKEN
+from core.bot import SlayerBot
 
-bot = SoloLevelingBot()
+
+async def main():
+    bot = SlayerBot()
+    async with bot:
+        await bot.start(TOKEN)
+
 
 if __name__ == "__main__":
-    bot.run(TOKEN)
+    asyncio.run(main())
