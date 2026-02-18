@@ -1,141 +1,137 @@
 import discord
-from discord.ext import commands
 from discord import app_commands
+from discord.ext import commands
 
-from models.user_model import UserModel
-from systems.spawn_system import SpawnSystem
-from utils.embeds import base_embed, error_embed, success_embed
-
-
-def is_admin():
-    async def predicate(ctx_or_interaction):
-        user = ctx_or_interaction.user if isinstance(ctx_or_interaction, discord.Interaction) else ctx_or_interaction.author
-        return user.guild_permissions.administrator
-    return app_commands.check(predicate)
+from models.guild_model import GuildModel
+from models.shadow_model import ShadowModel
+from systems.rank_system import RankSystem
 
 
 class Admin(commands.Cog):
+
     def __init__(self, bot):
         self.bot = bot
 
     # -------------------------
-    # ADD XP
+    # SET SPAWN CHANNEL
     # -------------------------
 
-    @commands.command(name="addxp")
-    @commands.has_permissions(administrator=True)
-    async def addxp_prefix(self, ctx, member: discord.Member, amount: int):
-        await self.add_xp_logic(ctx, member, amount)
-
-    @app_commands.command(name="addxp", description="Add XP to a user")
+    @app_commands.command(
+        name="setspawn",
+        description="Set the channel where shadows spawn"
+    )
     @app_commands.checks.has_permissions(administrator=True)
-    async def addxp_slash(self, interaction: discord.Interaction, member: discord.Member, amount: int):
-        await interaction.response.defer()
-        await self.add_xp_logic(interaction, member, amount, slash=True)
+    async def set_spawn(
+        self,
+        interaction: discord.Interaction,
+        channel: discord.TextChannel
+    ):
+        await GuildModel.update_guild(
+            interaction.guild.id,
+            {"spawn_channel_id": channel.id}
+        )
 
-    async def add_xp_logic(self, ctx_or_interaction, member, amount, slash=False):
-        if amount <= 0:
-            embed = error_embed("Amount must be positive.")
-        else:
-            await UserModel.add_xp(member.id, amount)
-            embed = success_embed(f"Added {amount} XP to {member.mention}")
-
-        if slash:
-            await ctx_or_interaction.followup.send(embed=embed)
-        else:
-            await ctx_or_interaction.send(embed=embed)
+        await interaction.response.send_message(
+            f"✅ Spawn channel set to {channel.mention}"
+        )
 
     # -------------------------
-    # ADD GOLD
+    # SET PING ROLE
     # -------------------------
 
-    @commands.command(name="addgold")
-    @commands.has_permissions(administrator=True)
-    async def addgold_prefix(self, ctx, member: discord.Member, amount: int):
-        await self.add_gold_logic(ctx, member, amount)
-
-    @app_commands.command(name="addgold", description="Add gold to a user")
+    @app_commands.command(
+        name="setping",
+        description="Set role to ping when shadow spawns"
+    )
     @app_commands.checks.has_permissions(administrator=True)
-    async def addgold_slash(self, interaction: discord.Interaction, member: discord.Member, amount: int):
-        await interaction.response.defer()
-        await self.add_gold_logic(interaction, member, amount, slash=True)
+    async def set_ping(
+        self,
+        interaction: discord.Interaction,
+        role: discord.Role
+    ):
+        await GuildModel.update_guild(
+            interaction.guild.id,
+            {"ping_role_id": role.id}
+        )
 
-    async def add_gold_logic(self, ctx_or_interaction, member, amount, slash=False):
-        if amount <= 0:
-            embed = error_embed("Amount must be positive.")
-        else:
-            await UserModel.add_gold(member.id, amount)
-            embed = success_embed(f"Added {amount} gold to {member.mention}")
-
-        if slash:
-            await ctx_or_interaction.followup.send(embed=embed)
-        else:
-            await ctx_or_interaction.send(embed=embed)
+        await interaction.response.send_message(
+            f"✅ Spawn ping role set to {role.mention}"
+        )
 
     # -------------------------
-    # SET LEVEL
+    # ADD SHADOW
     # -------------------------
 
-    @commands.command(name="setlevel")
-    @commands.has_permissions(administrator=True)
-    async def setlevel_prefix(self, ctx, member: discord.Member, level: int):
-        await self.set_level_logic(ctx, member, level)
-
-    @app_commands.command(name="setlevel", description="Set a user's level")
+    @app_commands.command(
+        name="addshadow",
+        description="Add a new shadow to the database"
+    )
     @app_commands.checks.has_permissions(administrator=True)
-    async def setlevel_slash(self, interaction: discord.Interaction, member: discord.Member, level: int):
-        await interaction.response.defer()
-        await self.set_level_logic(interaction, member, level, slash=True)
+    async def add_shadow(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+        rarity: str,
+        spawn_chance: app_commands.Range[int, 1, 100],
+        hp: int,
+        defense: int,
+        attack: int,
+        image_url: str
+    ):
+        if not RankSystem.is_valid_rank(rarity):
+            await interaction.response.send_message(
+                "❌ Invalid rarity. Use: E, D, C, B, A, S, SS, SSS",
+                ephemeral=True
+            )
+            return
 
-    async def set_level_logic(self, ctx_or_interaction, member, level, slash=False):
-        if level <= 0:
-            embed = error_embed("Level must be greater than 0.")
-        else:
-            await UserModel.set_level(member.id, level)
-            embed = success_embed(f"{member.mention} level set to {level}")
+        shadow = await ShadowModel.add_shadow(
+            name=name,
+            rarity=rarity,
+            spawn_chance=spawn_chance,
+            hp=hp,
+            defense=defense,
+            attack=attack,
+            image_url=image_url
+        )
 
-        if slash:
-            await ctx_or_interaction.followup.send(embed=embed)
-        else:
-            await ctx_or_interaction.send(embed=embed)
+        if not shadow:
+            await interaction.response.send_message(
+                "❌ Shadow already exists.",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.send_message(
+            f"✅ Shadow **{name}** added successfully."
+        )
 
     # -------------------------
-    # FORCE SPAWN
+    # REMOVE SHADOW
     # -------------------------
 
-    @commands.command(name="forcespawn")
-    @commands.has_permissions(administrator=True)
-    async def forcespawn_prefix(self, ctx):
-        monster = SpawnSystem.spawn_for_channel(ctx.channel.id)
-        embed = base_embed(title="Forced Spawn")
-        embed.description = f"{monster['name']} has appeared!"
-        await ctx.send(embed=embed)
-
-    @app_commands.command(name="forcespawn", description="Force spawn a monster")
+    @app_commands.command(
+        name="removeshadow",
+        description="Remove a shadow from the database"
+    )
     @app_commands.checks.has_permissions(administrator=True)
-    async def forcespawn_slash(self, interaction: discord.Interaction):
-        monster = SpawnSystem.spawn_for_channel(interaction.channel.id)
-        embed = base_embed(title="Forced Spawn")
-        embed.description = f"{monster['name']} has appeared!"
-        await interaction.response.send_message(embed=embed)
+    async def remove_shadow(
+        self,
+        interaction: discord.Interaction,
+        name: str
+    ):
+        removed = await ShadowModel.remove_shadow(name)
 
-    # -------------------------
-    # RESET USER
-    # -------------------------
+        if not removed:
+            await interaction.response.send_message(
+                "❌ Shadow not found.",
+                ephemeral=True
+            )
+            return
 
-    @commands.command(name="resetuser")
-    @commands.has_permissions(administrator=True)
-    async def resetuser_prefix(self, ctx, member: discord.Member):
-        await UserModel.reset_user(member.id)
-        embed = success_embed(f"{member.mention} has been reset.")
-        await ctx.send(embed=embed)
-
-    @app_commands.command(name="resetuser", description="Reset a user's data")
-    @app_commands.checks.has_permissions(administrator=True)
-    async def resetuser_slash(self, interaction: discord.Interaction, member: discord.Member):
-        await UserModel.reset_user(member.id)
-        embed = success_embed(f"{member.mention} has been reset.")
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(
+            f"🗑️ Shadow **{name}** removed."
+        )
 
 
 async def setup(bot):
