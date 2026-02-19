@@ -2,11 +2,19 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+
 class Admin(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
         self.db = bot.db
+
+    # =====================================================
+    # PERMISSION CHECK
+    # =====================================================
+
+    async def cog_check(self, interaction: discord.Interaction):
+        return interaction.user.guild_permissions.administrator
 
     # =====================================================
     # CREATE NPC / BOSS
@@ -37,6 +45,7 @@ class Admin(commands.Cog):
             "auto_spawn": auto_spawn,
             "image_url": image_url,
             "spawn_channels": [],
+            "ping_role": None,
             "money_drop": 0,
             "xp_drop": 0,
             "mastery_drop": 0,
@@ -45,7 +54,7 @@ class Admin(commands.Cog):
 
         embed = discord.Embed(
             title="NPC Created",
-            description=f"**{name}** successfully created.",
+            description=f"**{name}** has been successfully created.",
             color=discord.Color.green()
         )
 
@@ -62,13 +71,64 @@ class Admin(commands.Cog):
         npc_name: str,
         channel: discord.TextChannel
     ):
+        npc = await self.db.npcs.find_one({"name": npc_name})
+        if not npc:
+            return await interaction.response.send_message("NPC not found.", ephemeral=True)
+
         await self.db.npcs.update_one(
             {"name": npc_name},
             {"$addToSet": {"spawn_channels": channel.id}}
         )
 
         await interaction.response.send_message(
-            f"{channel.mention} added as spawn channel for {npc_name}"
+            f"{channel.mention} added as spawn channel for **{npc_name}**"
+        )
+
+    # =====================================================
+    # SET PING ROLE
+    # =====================================================
+
+    @app_commands.command(name="setping")
+    async def setping(
+        self,
+        interaction: discord.Interaction,
+        npc_name: str,
+        role: discord.Role
+    ):
+        npc = await self.db.npcs.find_one({"name": npc_name})
+        if not npc:
+            return await interaction.response.send_message("NPC not found.", ephemeral=True)
+
+        await self.db.npcs.update_one(
+            {"name": npc_name},
+            {"$set": {"ping_role": role.id}}
+        )
+
+        embed = discord.Embed(
+            title="Ping Role Set",
+            description=f"{role.mention} will be pinged when **{npc_name}** spawns.",
+            color=discord.Color.blue()
+        )
+
+        await interaction.response.send_message(embed=embed)
+
+    # =====================================================
+    # REMOVE PING ROLE
+    # =====================================================
+
+    @app_commands.command(name="removeping")
+    async def removeping(
+        self,
+        interaction: discord.Interaction,
+        npc_name: str
+    ):
+        await self.db.npcs.update_one(
+            {"name": npc_name},
+            {"$set": {"ping_role": None}}
+        )
+
+        await interaction.response.send_message(
+            f"Ping role removed for **{npc_name}**"
         )
 
     # =====================================================
@@ -84,6 +144,10 @@ class Admin(commands.Cog):
         min_damage: int,
         max_damage: int
     ):
+        npc = await self.db.npcs.find_one({"name": npc_name})
+        if not npc:
+            return await interaction.response.send_message("NPC not found.", ephemeral=True)
+
         move_data = {
             "name": move_name,
             "min": min_damage,
@@ -96,7 +160,7 @@ class Admin(commands.Cog):
         )
 
         await interaction.response.send_message(
-            f"Move **{move_name}** added to {npc_name}"
+            f"Move **{move_name}** added to **{npc_name}**"
         )
 
     # =====================================================
@@ -116,7 +180,7 @@ class Admin(commands.Cog):
         )
 
         await interaction.response.send_message(
-            f"Money drop for {npc_name} set to {amount}"
+            f"Money drop for **{npc_name}** set to {amount}"
         )
 
     @app_commands.command(name="removemoneydrop")
@@ -131,7 +195,7 @@ class Admin(commands.Cog):
         )
 
         await interaction.response.send_message(
-            f"Money drop removed for {npc_name}"
+            f"Money drop removed for **{npc_name}**"
         )
 
     # =====================================================
@@ -151,7 +215,7 @@ class Admin(commands.Cog):
         )
 
         await interaction.response.send_message(
-            f"XP drop for {npc_name} set to {amount}"
+            f"XP drop for **{npc_name}** set to {amount}"
         )
 
     # =====================================================
@@ -171,7 +235,7 @@ class Admin(commands.Cog):
         )
 
         await interaction.response.send_message(
-            f"Mastery drop for {npc_name} set to {amount}"
+            f"Mastery drop for **{npc_name}** set to {amount}"
         )
 
     # =====================================================
@@ -196,7 +260,7 @@ class Admin(commands.Cog):
         )
 
         await interaction.response.send_message(
-            f"{name} buy requirement updated."
+            f"Technique **{name}** buy requirements updated."
         )
 
     # =====================================================
@@ -207,7 +271,7 @@ class Admin(commands.Cog):
     async def setmastery(
         self,
         interaction: discord.Interaction,
-        category: str,  # weapon / technique / fighting
+        category: str,
         skill_name: str,
         mastery_required: int
     ):
@@ -221,7 +285,7 @@ class Admin(commands.Cog):
         )
 
         await interaction.response.send_message(
-            f"Mastery requirement set for {skill_name}"
+            f"Mastery requirement set for **{skill_name}**"
         )
 
 
