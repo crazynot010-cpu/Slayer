@@ -1,9 +1,12 @@
-from motor.motor_asyncio import AsyncIOMotorClient
-from settings import MONGO_URI
+import motor.motor_asyncio
+from config import MONGO_URI, DATABASE_NAME
 
-client = AsyncIOMotorClient(MONGO_URI)
-db = client["slayer"]
 
-users_collection = db["users"]
-guilds_collection = db["guilds"]
-shadows_collection = db["shadows"]
+class Database:
+
+    def __init__(self):
+        self.client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URI)
+        self.db = self.client[DATABASE_NAME]
+
+    def get_db(self):
+        return self.db
