@@ -74,7 +74,7 @@ class Admin(commands.Cog):
         rarity: str,
         spawn_chance: app_commands.Range[int, 1, 100],
         hp: int,
-        defense: int,
+        stm: int,
         attack: int,
         image_url: str
     ):
@@ -90,9 +90,9 @@ class Admin(commands.Cog):
             rarity=rarity,
             spawn_chance=spawn_chance,
             hp=hp,
-            defense=defense,
+            stm=stm,
             attack=attack,
-            image_url=image_url
+            image_ur=image_url
         )
 
         if not shadow:
