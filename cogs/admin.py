@@ -1,7 +1,8 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
-
+from models.user_model import UserModel
+from systems.spawn_system import spawn_system
 from models.guild_model import GuildModel
 from models.shadow_model import ShadowModel
 from systems.rank_system import RankSystem
@@ -107,32 +108,50 @@ class Admin(commands.Cog):
         )
 
     # -------------------------
-    # REMOVE SHADOW
-    # -------------------------
+# REMOVE SHADOW
+# -------------------------
 
-    @app_commands.command(
-        name="removeshadow",
-        description="Remove a shadow from the database"
-    )
-    @app_commands.checks.has_permissions(administrator=True)
-    async def remove_shadow(
-        self,
-        interaction: discord.Interaction,
-        name: str
-    ):
-        removed = await ShadowModel.remove_shadow(name)
+@app_commands.command(
+    name="removeshadow",
+    description="Remove a shadow from the database and all inventories"
+)
+@app_commands.checks.has_permissions(administrator=True)
+async def remove_shadow(
+    self,
+    interaction: discord.Interaction,
+    name: str
+):
+    name = name.lower()
 
-        if not removed:
-            await interaction.response.send_message(
-                "❌ Shadow not found.",
-                ephemeral=True
-            )
-            return
+    # Remove from shadow collection
+    removed = await ShadowModel.remove_shadow(name)
 
+    if not removed:
         await interaction.response.send_message(
-            f"🗑️ Shadow **{name}** removed."
+            "❌ Shadow not found.",
+            ephemeral=True
         )
+        return
 
+    # Remove from ALL user inventories
+    await UserModel.collection.update_many(
+        {},
+        {
+            "$pull": {
+                "shadows": {"name": name}
+            }
+        }
+    )
+
+    # Remove active spawn if it exists
+    active = spawn_system.active_spawns.get(interaction.guild.id)
+
+    if active and active["name"].lower() == name:
+        del spawn_system.active_spawns[interaction.guild.id]
+
+    await interaction.response.send_message(
+        f"🗑️ Shadow **{name}** removed from database and all inventories."
+    )
 
 async def setup(bot):
     await bot.add_cog(Admin(bot))
