@@ -1,0 +1,26 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+TOKEN = os.getenv("TOKEN")
+MONGO_URI = os.getenv("MONGO_URI")
+
+DATABASE_NAME = "mmorpg_bot"
+
+# Game Constants
+BASE_HP = 100
+BASE_CE = 50
+BASE_DAMAGE = 10
+
+LEVEL_BASE_XP = 100
+LEVEL_XP_SCALING = 1.5
+
+STAT_HP_MULTIPLIER = 20
+STAT_CE_MULTIPLIER = 10
+STAT_DMG_MULTIPLIER = 5
+
+CRIT_CHANCE = 0.10
+CRIT_MULTIPLIER = 2.0
+
+HIGHEST_DAMAGE_BONUS_PERCENT = 0.25
