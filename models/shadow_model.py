@@ -10,7 +10,7 @@ class ShadowModel:
         rarity: str,
         spawn_chance: int,
         hp: int,
-        defense: int,
+        stm: int,
         attack: int,
         image_url: str
     ):
@@ -26,7 +26,7 @@ class ShadowModel:
             "rarity": rarity.upper(),
             "spawn_chance": spawn_chance,
             "hp": hp,
-            "defense": defense,
+            "stm": stm,
             "attack": attack,
             "image_url": image_url
         }
