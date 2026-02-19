@@ -11,3 +11,5 @@ if not TOKEN:
 
 if not MONGO_URI:
     raise ValueError("MONGO_URI environment variable not set.")
+
+PREFIX = "!"
