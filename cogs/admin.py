@@ -3,229 +3,227 @@ from discord import app_commands
 from discord.ext import commands
 
 class Admin(commands.Cog):
+
     def __init__(self, bot):
         self.bot = bot
+        self.db = bot.db
 
-    # ---------------------------
-    # PERMISSION CHECK
-    # ---------------------------
+    # =====================================================
+    # CREATE NPC / BOSS
+    # =====================================================
 
-    async def cog_check(self, interaction: discord.Interaction):
-        return interaction.user.guild_permissions.administrator
-
-    # ===========================
-    # NPC CREATE
-    # ===========================
-
-    @app_commands.command(name="npc", description="Create an NPC")
-    async def npc_create(
+    @app_commands.command(name="createnpc", description="Create an NPC or Boss")
+    async def createnpc(
         self,
         interaction: discord.Interaction,
-        boss: bool,
         name: str,
-        itemdrops: str,
-        dropchance: float,
-        imageurl: str
+        hp: int,
+        damage: int,
+        boss: bool,
+        auto_spawn: bool,
+        image_url: str = None
     ):
-        await self.bot.db.npcs.insert_one({
+        existing = await self.db.npcs.find_one({"name": name})
+        if existing:
+            return await interaction.response.send_message(
+                "NPC already exists.", ephemeral=True
+            )
+
+        await self.db.npcs.insert_one({
             "name": name,
+            "hp": hp,
+            "damage": damage,
             "boss": boss,
-            "item_drops": itemdrops.split(","),
-            "drop_chance": dropchance,
-            "image_url": imageurl,
+            "auto_spawn": auto_spawn,
+            "image_url": image_url,
             "spawn_channels": [],
-            "ping_role": None,
             "money_drop": 0,
+            "xp_drop": 0,
             "mastery_drop": 0,
-            "auto_spawn": True
+            "moves": []
         })
 
-        await interaction.response.send_message(
-            f"NPC `{name}` created successfully.",
-            ephemeral=True
+        embed = discord.Embed(
+            title="NPC Created",
+            description=f"**{name}** successfully created.",
+            color=discord.Color.green()
         )
 
-    # ===========================
-    # SPAWN CHANNEL
-    # ===========================
+        await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="npcspawnchannel")
-    async def npc_spawn_channel(
+    # =====================================================
+    # ADD SPAWN CHANNEL
+    # =====================================================
+
+    @app_commands.command(name="addspawnchannel")
+    async def addspawnchannel(
         self,
         interaction: discord.Interaction,
-        npcname: str,
+        npc_name: str,
         channel: discord.TextChannel
     ):
-        await self.bot.db.npcs.update_one(
-            {"name": npcname},
+        await self.db.npcs.update_one(
+            {"name": npc_name},
             {"$addToSet": {"spawn_channels": channel.id}}
         )
 
-        await interaction.response.send_message("Spawn channel added.", ephemeral=True)
-
-    @app_commands.command(name="removenpcfromchannel")
-    async def remove_spawn_channel(
-        self,
-        interaction: discord.Interaction,
-        npcname: str,
-        channel: discord.TextChannel
-    ):
-        await self.bot.db.npcs.update_one(
-            {"name": npcname},
-            {"$pull": {"spawn_channels": channel.id}}
+        await interaction.response.send_message(
+            f"{channel.mention} added as spawn channel for {npc_name}"
         )
 
-        await interaction.response.send_message("Spawn channel removed.", ephemeral=True)
+    # =====================================================
+    # ADD BOSS MOVE
+    # =====================================================
 
-    # ===========================
-    # SET PING ROLE
-    # ===========================
-
-    @app_commands.command(name="setpingrole")
-    async def set_ping_role(
+    @app_commands.command(name="addmove")
+    async def addmove(
         self,
         interaction: discord.Interaction,
-        npcname: str,
-        role: discord.Role
+        npc_name: str,
+        move_name: str,
+        min_damage: int,
+        max_damage: int
     ):
-        await self.bot.db.npcs.update_one(
-            {"name": npcname},
-            {"$set": {"ping_role": role.id}}
+        move_data = {
+            "name": move_name,
+            "min": min_damage,
+            "max": max_damage
+        }
+
+        await self.db.npcs.update_one(
+            {"name": npc_name},
+            {"$push": {"moves": move_data}}
         )
 
-        await interaction.response.send_message("Ping role set.", ephemeral=True)
-
-    @app_commands.command(name="removeping")
-    async def remove_ping(
-        self,
-        interaction: discord.Interaction,
-        npcname: str
-    ):
-        await self.bot.db.npcs.update_one(
-            {"name": npcname},
-            {"$set": {"ping_role": None}}
+        await interaction.response.send_message(
+            f"Move **{move_name}** added to {npc_name}"
         )
 
-        await interaction.response.send_message("Ping removed.", ephemeral=True)
-
-    # ===========================
-    # ITEM CREATE
-    # ===========================
-
-    @app_commands.command(name="itemcreate")
-    async def item_create(
-        self,
-        interaction: discord.Interaction,
-        name: str,
-        weapon: bool,
-        damage: int,
-        grade: str
-    ):
-        await self.bot.db.items.insert_one({
-            "name": name,
-            "weapon": weapon,
-            "damage": damage if weapon else 0,
-            "grade": grade,
-            "skills": [],
-            "buffs": {}
-        })
-
-        await interaction.response.send_message("Item created.", ephemeral=True)
-
-    @app_commands.command(name="itemremove")
-    async def item_remove(self, interaction: discord.Interaction, name: str):
-        await self.bot.db.items.delete_one({"name": name})
-        await interaction.response.send_message("Item removed.", ephemeral=True)
-
-    # ===========================
-    # TECHNIQUE CREATE
-    # ===========================
-
-    @app_commands.command(name="techniquecreate")
-    async def technique_create(
-        self,
-        interaction: discord.Interaction,
-        name: str,
-        stockchance: float
-    ):
-        await self.bot.db.techniques.insert_one({
-            "name": name,
-            "stock_chance": stockchance,
-            "skills": [],
-            "buffs": {},
-            "domain": None
-        })
-
-        await interaction.response.send_message("Technique created.", ephemeral=True)
-
-    @app_commands.command(name="technremove")
-    async def technique_remove(self, interaction: discord.Interaction, name: str):
-        await self.bot.db.techniques.delete_one({"name": name})
-        await interaction.response.send_message("Technique removed.", ephemeral=True)
-
-    # ===========================
-    # DOMAIN SET
-    # ===========================
-
-    @app_commands.command(name="domainset")
-    async def domain_set(
-        self,
-        interaction: discord.Interaction,
-        techniquename: str,
-        name: str,
-        hpbuff: int,
-        dmgbuff: int,
-        cebuff: int
-    ):
-        await self.bot.db.techniques.update_one(
-            {"name": techniquename},
-            {"$set": {
-                "domain": {
-                    "name": name,
-                    "hp_buff": hpbuff,
-                    "dmg_buff": dmgbuff,
-                    "ce_buff": cebuff
-                }
-            }}
-        )
-
-        await interaction.response.send_message("Domain set.", ephemeral=True)
-
-    # ===========================
-    # MONEY DROP
-    # ===========================
+    # =====================================================
+    # MONEY DROP SYSTEM
+    # =====================================================
 
     @app_commands.command(name="setmoneydrop")
-    async def set_money_drop(
+    async def setmoneydrop(
         self,
         interaction: discord.Interaction,
-        npcname: str,
+        npc_name: str,
         amount: int
     ):
-        await self.bot.db.npcs.update_one(
-            {"name": npcname},
+        await self.db.npcs.update_one(
+            {"name": npc_name},
             {"$set": {"money_drop": amount}}
         )
 
-        await interaction.response.send_message("Money drop set.", ephemeral=True)
+        await interaction.response.send_message(
+            f"Money drop for {npc_name} set to {amount}"
+        )
 
-    # ===========================
-    # MASTERY DROP
-    # ===========================
-
-    @app_commands.command(name="masterydrop")
-    async def mastery_drop(
+    @app_commands.command(name="removemoneydrop")
+    async def removemoneydrop(
         self,
         interaction: discord.Interaction,
-        npcname: str,
+        npc_name: str
+    ):
+        await self.db.npcs.update_one(
+            {"name": npc_name},
+            {"$set": {"money_drop": 0}}
+        )
+
+        await interaction.response.send_message(
+            f"Money drop removed for {npc_name}"
+        )
+
+    # =====================================================
+    # XP DROP SYSTEM
+    # =====================================================
+
+    @app_commands.command(name="setxpdrop")
+    async def setxpdrop(
+        self,
+        interaction: discord.Interaction,
+        npc_name: str,
         amount: int
     ):
-        await self.bot.db.npcs.update_one(
-            {"name": npcname},
+        await self.db.npcs.update_one(
+            {"name": npc_name},
+            {"$set": {"xp_drop": amount}}
+        )
+
+        await interaction.response.send_message(
+            f"XP drop for {npc_name} set to {amount}"
+        )
+
+    # =====================================================
+    # MASTERY DROP SYSTEM
+    # =====================================================
+
+    @app_commands.command(name="masterydrop")
+    async def masterydrop(
+        self,
+        interaction: discord.Interaction,
+        npc_name: str,
+        amount: int
+    ):
+        await self.db.npcs.update_one(
+            {"name": npc_name},
             {"$set": {"mastery_drop": amount}}
         )
 
-        await interaction.response.send_message("Mastery drop set.", ephemeral=True)
+        await interaction.response.send_message(
+            f"Mastery drop for {npc_name} set to {amount}"
+        )
+
+    # =====================================================
+    # TECHNIQUE BUY REQUIREMENTS
+    # =====================================================
+
+    @app_commands.command(name="settechniquebuy")
+    async def settechniquebuy(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+        required_money: int,
+        required_item: str = None
+    ):
+        await self.db.techniques.update_one(
+            {"name": name},
+            {"$set": {
+                "price": required_money,
+                "required_item": required_item
+            }},
+            upsert=True
+        )
+
+        await interaction.response.send_message(
+            f"{name} buy requirement updated."
+        )
+
+    # =====================================================
+    # PERMANENT MASTERY REQUIREMENT
+    # =====================================================
+
+    @app_commands.command(name="setmastery")
+    async def setmastery(
+        self,
+        interaction: discord.Interaction,
+        category: str,  # weapon / technique / fighting
+        skill_name: str,
+        mastery_required: int
+    ):
+        await self.db.mastery.update_one(
+            {"skill": skill_name},
+            {"$set": {
+                "category": category.lower(),
+                "required": mastery_required
+            }},
+            upsert=True
+        )
+
+        await interaction.response.send_message(
+            f"Mastery requirement set for {skill_name}"
+        )
+
 
 async def setup(bot):
     await bot.add_cog(Admin(bot))
