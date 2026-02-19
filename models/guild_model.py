@@ -1,29 +1,22 @@
-from database import guilds_collection
-
-
-class GuildModel:
-
-    @staticmethod
-    async def get_guild(guild_id: int):
-        guild = await guilds_collection.find_one({"guild_id": guild_id})
-
-        if not guild:
-            guild = {
-                "guild_id": guild_id,
-                "spawn_channel_id": None,
-                "ping_role_id": None,
-                "message_count": 0,
-                "spawn_threshold": 0,
-                "active_shadow": None
-            }
-            await guilds_collection.insert_one(guild)
-
-        return guild
-
-    @staticmethod
-    async def update_guild(guild_id: int, data: dict):
-        await guilds_collection.update_one(
-            {"guild_id": guild_id},
-            {"$set": data},
-            upsert=True
-        )
+NPC_TEMPLATES = {
+    "goblin": {
+        "name": "Goblin",
+        "level": 1,
+        "hp": 80,
+        "attack": 8,
+        "defense": 3,
+        "xp_reward": 40,
+        "money_reward": 25,
+        "crit_chance": 0.05
+    },
+    "orc": {
+        "name": "Orc",
+        "level": 3,
+        "hp": 150,
+        "attack": 18,
+        "defense": 6,
+        "xp_reward": 100,
+        "money_reward": 60,
+        "crit_chance": 0.10
+    }
+}
