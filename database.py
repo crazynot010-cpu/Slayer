@@ -1,4 +1,11 @@
-import motor.motor_asyncio
+from motor.motor_asyncio import AsyncIOMotorClient
+from settings import MONGO_URI
+
+client = AsyncIOMotorClient(MONGO_URI)
+db = client["mmorpg_bot"]
+
+players_collection = db["players"]
+guilds_collection = db["guilds"]import motor.motor_asyncio
 from config import MONGO_URI, DATABASE_NAME
 
 
